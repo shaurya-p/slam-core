@@ -32,6 +32,8 @@ data/
 *.csv
 runs/
 outputs/
+results/
+*.rrd
 
 # OS
 .DS_Store

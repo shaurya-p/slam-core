@@ -1,0 +1,11 @@
+# EuRoC MAV Dataset — MH_01_easy
+# Sequence root: $SLAM_CORE_DATASETS/euroc/MH_01_easy
+dataset_type: euroc
+sequence: MH_01_easy
+
+# Paths relative to sequence root
+imu_csv: mav0/imu0/data.csv
+cam0_csv: mav0/cam0/data.csv
+cam0_images: mav0/cam0/data/
+cam1_csv: mav0/cam1/data.csv
+cam1_images: mav0/cam1/data/
