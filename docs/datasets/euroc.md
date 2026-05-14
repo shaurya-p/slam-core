@@ -1,17 +1,26 @@
 # EuRoC Dataset Setup
 
-## Environment variable
+## Dataset root resolution
 
-All external datasets live under a single root directory controlled by:
+Scripts resolve the dataset root in this priority order:
 
-```
-export SLAM_CORE_DATASETS=/path/to/your/datasets
+1. **CLI argument** — `--dataset-root /path/to/datasets`
+2. **Environment variable** — `SLAM_CORE_DATASETS=/path/to/datasets`
+3. **Config field** — `dataset_root: /path/to/datasets` in the sequence yaml
+4. **Error** — if none of the above are set, the script exits with a message listing all three options
+
+The committed configs contain no `dataset_root` field so they stay portable across machines.
+
+Recommended setup:
+
+```bash
+export SLAM_CORE_DATASETS=~/datasets
 ```
 
 ## Expected layout
 
 ```
-$SLAM_CORE_DATASETS/
+<dataset_root>/
   euroc/
     MH_01_easy/
       mav0/
@@ -35,7 +44,7 @@ timestamp [ns], w_RS_S_x [rad s^-1], w_RS_S_y [rad s^-1], w_RS_S_z [rad s^-1],
 a_RS_S_x [m s^-2], a_RS_S_y [m s^-2], a_RS_S_z [m s^-2]
 ```
 
-Timestamps are in nanoseconds. The script converts to seconds internally.
+Timestamps are in nanoseconds. Scripts convert to seconds internally.
 
 ## Camera CSV format
 
@@ -56,5 +65,10 @@ configs/datasets/euroc_mh01.yaml
 Pass the config path to scripts:
 
 ```bash
+# Using env var (recommended)
+export SLAM_CORE_DATASETS=~/datasets
 uv run python scripts/rerun_euroc_debug.py configs/datasets/euroc_mh01.yaml
+
+# Using CLI arg (overrides env var)
+uv run python scripts/rerun_euroc_debug.py configs/datasets/euroc_mh01.yaml --dataset-root ~/datasets
 ```
