@@ -157,9 +157,11 @@ def log_stereo_images(
     start_s: float,
     stride: int = 1,
     max_frames: int | None = None,
-) -> int:
+) -> tuple[int, float | None, float | None]:
     cam1_by_ts = {ts: fn for ts, fn in cam1}
     logged = 0
+    t_first: float | None = None
+    t_last:  float | None = None
     for i, (ts, fn0) in enumerate(cam0):
         if i % stride != 0:
             continue
@@ -175,8 +177,11 @@ def log_stereo_images(
         set_rerun_time(ts, start_s)
         rr.log("camera/cam0", rr.Image(img0))
         rr.log("camera/cam1", rr.Image(img1))
+        if t_first is None:
+            t_first = ts
+        t_last = ts
         logged += 1
-    return logged
+    return logged, t_first, t_last
 
 
 # ---------------------------------------------------------------------------
@@ -257,19 +262,43 @@ def main() -> None:
     # Sequence-relative time origin from first IMU sample
     start_s = imu_rows[0]["timestamp_s"] if imu_rows else 0.0
 
-    # Log
-    log_imu(imu_to_log, start_s)
-    n_stereo = log_stereo_images(
+    # Log stereo first to obtain the logged timestamp window
+    n_stereo, cam_t_first, cam_t_last = log_stereo_images(
         cam0_entries, cam1_entries, cam0_dir, cam1_dir, start_s,
         stride=image_stride, max_frames=max_frames,
     )
 
+    # In debug mode, align IMU to the camera window
+    if not args.full:
+        if cam_t_first is None or cam_t_last is None:
+            sys.exit(
+                "Error: no stereo frames were logged. "
+                "Cannot determine camera time window for IMU alignment.\n"
+                "Check that the dataset paths are correct and stereo CSVs are non-empty."
+            )
+        imu_to_log = [
+            r for r in imu_to_log
+            if cam_t_first <= r["timestamp_s"] <= cam_t_last
+        ]
+
+    log_imu(imu_to_log, start_s)
+
     # Summary
-    if imu_rows:
-        duration = imu_rows[-1]["timestamp_s"] - imu_rows[0]["timestamp_s"]
-        print(f"  Duration:  {duration:.2f} s")
-    print(f"  IMU:       {len(imu_rows):6d} read,  {len(imu_to_log):6d} logged")
-    print(f"  Stereo:    {len(cam0_entries):6d} read,  {n_stereo:6d} logged")
+    def rel(t: float) -> float:
+        return t - start_s
+
+    if cam_t_first is not None and cam_t_last is not None:
+        print(f"  Camera:  {len(cam0_entries):6d} read,  {n_stereo:6d} logged"
+              f"  [{rel(cam_t_first):.2f} – {rel(cam_t_last):.2f} s]")
+    else:
+        print(f"  Camera:  {len(cam0_entries):6d} read,  {n_stereo:6d} logged")
+    imu_t_first = imu_to_log[0]["timestamp_s"]  if imu_to_log else None
+    imu_t_last  = imu_to_log[-1]["timestamp_s"] if imu_to_log else None
+    if imu_t_first is not None and imu_t_last is not None:
+        print(f"  IMU:     {len(imu_rows):6d} read,  {len(imu_to_log):6d} logged"
+              f"  [{rel(imu_t_first):.2f} – {rel(imu_t_last):.2f} s]")
+    else:
+        print(f"  IMU:     {len(imu_rows):6d} read,  {len(imu_to_log):6d} logged")
     print(f"  Saved: {rrd_path}")
 
 
