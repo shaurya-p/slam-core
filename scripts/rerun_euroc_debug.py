@@ -24,101 +24,23 @@ Dataset root resolution order:
 """
 
 import argparse
-import csv
 import math
-import os
 import sys
 from pathlib import Path
 
 import cv2
-import numpy as np
 import rerun as rr
-import yaml
 
-
-# ---------------------------------------------------------------------------
-# Config and path resolution
-# ---------------------------------------------------------------------------
-
-def load_config(config_path: Path) -> dict:
-    with open(config_path) as f:
-        return yaml.safe_load(f)
-
-
-def resolve_sequence_root(dataset_root_arg: str | None, cfg: dict) -> Path:
-    # Priority: CLI arg > env var > config field
-    dataset_root = (
-        dataset_root_arg
-        or os.environ.get("SLAM_CORE_DATASETS")
-        or cfg.get("dataset_root")
-    )
-    if not dataset_root:
-        sys.exit(
-            "Error: dataset root not found. Provide it via one of:\n"
-            "  1. --dataset-root /path/to/datasets\n"
-            "  2. export SLAM_CORE_DATASETS=/path/to/datasets\n"
-            "  3. dataset_root: /path/to/datasets  (in config yaml)"
-        )
-    root = Path(dataset_root) / "euroc" / cfg["sequence"]
-    if not root.exists():
-        sys.exit(
-            f"Error: sequence directory not found: {root}\n"
-            f"Expected layout: <dataset_root>/euroc/{cfg['sequence']}/"
-        )
-    return root
-
-
-# ---------------------------------------------------------------------------
-# IMU/Camera reading
-# ---------------------------------------------------------------------------
-
-def read_imu_csv(path: Path) -> list[dict]:
-    if not path.exists():
-        sys.exit(f"Error: IMU CSV not found: {path}")
-    rows = []
-    with open(path) as f:
-        reader = csv.reader(f)
-        next(reader)  # skip header
-        for line in reader:
-            ts_ns, wx, wy, wz, ax, ay, az = (x.strip() for x in line[:7])
-            rows.append({
-                "timestamp_s": float(ts_ns) * 1e-9,
-                "gyro": (float(wx), float(wy), float(wz)),
-                "accel": (float(ax), float(ay), float(az)),
-            })
-    return rows
-
-
-def validate_imu(rows: list[dict]) -> None:
-    errors = 0
-    prev_t = None
-    for i, r in enumerate(rows):
-        vals = [r["timestamp_s"], *r["gyro"], *r["accel"]]
-        if not all(math.isfinite(v) for v in vals):
-            print(f"  [warn] IMU row {i}: non-finite value")
-            errors += 1
-        if prev_t is not None and r["timestamp_s"] <= prev_t:
-            print(f"  [warn] IMU row {i}: non-monotonic timestamp")
-            errors += 1
-        prev_t = r["timestamp_s"]
-    if errors:
-        print(f"  {errors} IMU validation warning(s)")
-    else:
-        print(f"  IMU: {len(rows)} samples, all valid")
-
-
-
-def read_cam_csv(path: Path) -> list[tuple[float, str]]:
-    if not path.exists():
-        sys.exit(f"Error: camera CSV not found: {path}")
-    entries = []
-    with open(path) as f:
-        reader = csv.reader(f)
-        next(reader)  # skip header
-        for line in reader:
-            ts_ns, filename = line[0].strip(), line[1].strip()
-            entries.append((float(ts_ns) * 1e-9, filename))
-    return entries
+from slam_core_tools.datasets.euroc import (
+    ImuSample,
+    StereoPair,
+    associate_stereo_pairs,
+    load_config,
+    read_cam_csv,
+    read_imu_csv,
+    resolve_sequence_root,
+    validate_imu,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -130,10 +52,10 @@ def set_rerun_time(t_s: float, start_s: float) -> None:
     rr.set_time("time", duration=t_rel_s)
 
 
-def log_imu(rows: list[dict], start_s: float) -> None:
-    for i, r in enumerate(rows):
-        gx, gy, gz = r["gyro"]
-        ax, ay, az = r["accel"]
+def log_imu(samples: list[ImuSample], start_s: float) -> None:
+    for i, s in enumerate(samples):
+        gx, gy, gz = s.gyro_radps
+        ax, ay, az = s.accel_mps2
         gyro_norm          = math.sqrt(gx**2 + gy**2 + gz**2)
         accel_norm         = math.sqrt(ax**2 + ay**2 + az**2)
         accel_norm_minus_g = accel_norm - 9.81
@@ -141,49 +63,44 @@ def log_imu(rows: list[dict], start_s: float) -> None:
             print(f"  [imu_derived sample 0]  gyro_norm={gyro_norm:.4f} rad/s"
                   f"  accel_norm={accel_norm:.4f} m/s²"
                   f"  norm_minus_g={accel_norm_minus_g:.4f} m/s²")
-        set_rerun_time(r["timestamp_s"], start_s)
-        rr.log("imu/gyro/x",                                  rr.Scalars(gx))
-        rr.log("imu/gyro/y",                                  rr.Scalars(gy))
-        rr.log("imu/gyro/z",                                  rr.Scalars(gz))
-        rr.log("imu/accel/x",                                 rr.Scalars(ax))
-        rr.log("imu/accel/y",                                 rr.Scalars(ay))
-        rr.log("imu/accel/z",                                 rr.Scalars(az))
-        rr.log("imu_derived/gyro_norm_radps",                 rr.Scalars(gyro_norm))
-        rr.log("imu_derived/accel_norm_mps2",                 rr.Scalars(accel_norm))
-        rr.log("imu_derived/accel_norm_minus_gravity_mps2",   rr.Scalars(accel_norm_minus_g))
+        set_rerun_time(s.timestamp_s, start_s)
+        rr.log("imu/gyro/x",                                 rr.Scalars(gx))
+        rr.log("imu/gyro/y",                                 rr.Scalars(gy))
+        rr.log("imu/gyro/z",                                 rr.Scalars(gz))
+        rr.log("imu/accel/x",                                rr.Scalars(ax))
+        rr.log("imu/accel/y",                                rr.Scalars(ay))
+        rr.log("imu/accel/z",                                rr.Scalars(az))
+        rr.log("imu_derived/gyro_norm_radps",                rr.Scalars(gyro_norm))
+        rr.log("imu_derived/accel_norm_mps2",                rr.Scalars(accel_norm))
+        rr.log("imu_derived/accel_norm_minus_gravity_mps2",  rr.Scalars(accel_norm_minus_g))
 
 
 def log_stereo_images(
-    cam0: list[tuple[float, str]],
-    cam1: list[tuple[float, str]],
+    pairs: list[StereoPair],
     cam0_dir: Path,
     cam1_dir: Path,
     start_s: float,
     stride: int = 1,
     max_frames: int | None = None,
 ) -> tuple[int, float | None, float | None]:
-    cam1_by_ts = {ts: fn for ts, fn in cam1}
     logged = 0
     t_first: float | None = None
     t_last:  float | None = None
-    for i, (ts, fn0) in enumerate(cam0):
+    for i, pair in enumerate(pairs):
         if i % stride != 0:
             continue
         if max_frames is not None and logged >= max_frames:
             break
-        fn1 = cam1_by_ts.get(ts)
-        if fn1 is None:
-            continue
-        img0 = cv2.imread(str(cam0_dir / fn0), cv2.IMREAD_GRAYSCALE)
-        img1 = cv2.imread(str(cam1_dir / fn1), cv2.IMREAD_GRAYSCALE)
+        img0 = cv2.imread(str(cam0_dir / pair.filename_cam0), cv2.IMREAD_GRAYSCALE)
+        img1 = cv2.imread(str(cam1_dir / pair.filename_cam1), cv2.IMREAD_GRAYSCALE)
         if img0 is None or img1 is None:
             continue
-        set_rerun_time(ts, start_s)
+        set_rerun_time(pair.timestamp_s, start_s)
         rr.log("camera/cam0", rr.Image(img0))
         rr.log("camera/cam1", rr.Image(img1))
         if t_first is None:
-            t_first = ts
-        t_last = ts
+            t_first = pair.timestamp_s
+        t_last = pair.timestamp_s
         logged += 1
     return logged, t_first, t_last
 
@@ -224,33 +141,50 @@ def main() -> None:
     )
     args = parser.parse_args()
 
+    # Config and path resolution
     config_path = Path(args.config)
-    if not config_path.exists():
-        sys.exit(f"Error: config not found: {config_path}")
+    try:
+        cfg = load_config(config_path)
+        seq_root = resolve_sequence_root(args.dataset_root, cfg)
+    except (FileNotFoundError, ValueError) as e:
+        sys.exit(f"Error: {e}")
 
-    cfg = load_config(config_path)
-    seq_root = resolve_sequence_root(args.dataset_root, cfg)
     sequence = cfg["sequence"]
-
     print(f"Sequence: {sequence}")
     print(f"Root:     {seq_root}")
 
-    # Read data
-    imu_rows = read_imu_csv(seq_root / cfg["imu_csv"])
-    validate_imu(imu_rows)
+    # Read and validate IMU
+    try:
+        imu_samples = read_imu_csv(seq_root / cfg["imu_csv"])
+    except FileNotFoundError as e:
+        sys.exit(f"Error: {e}")
 
-    cam0_entries = read_cam_csv(seq_root / cfg["cam0_csv"])
-    cam1_entries = read_cam_csv(seq_root / cfg["cam1_csv"])
+    imu_warnings = validate_imu(imu_samples)
+    for w in imu_warnings:
+        print(f"  [warn] IMU {w}")
+    if imu_warnings:
+        print(f"  {len(imu_warnings)} IMU validation warning(s)")
+    else:
+        print(f"  IMU: {len(imu_samples)} samples, all valid")
+
+    # Read camera CSVs and associate stereo pairs
+    try:
+        cam0_frames = read_cam_csv(seq_root / cfg["cam0_csv"])
+        cam1_frames = read_cam_csv(seq_root / cfg["cam1_csv"])
+    except FileNotFoundError as e:
+        sys.exit(f"Error: {e}")
+
+    stereo_pairs = associate_stereo_pairs(cam0_frames, cam1_frames)
     cam0_dir = seq_root / cfg["cam0_images"]
     cam1_dir = seq_root / cfg["cam1_images"]
 
     # Sampling parameters
     if args.full:
-        imu_to_log = imu_rows
+        imu_to_log = imu_samples
         image_stride, max_frames = 1, None
         mode = "full"
     else:
-        imu_to_log = imu_rows[::args.imu_stride]
+        imu_to_log = imu_samples[::args.imu_stride]
         image_stride, max_frames = args.image_stride, args.max_frames
         mode = "debug"
 
@@ -264,11 +198,11 @@ def main() -> None:
     rr.save(str(rrd_path))
 
     # Sequence-relative time origin from first IMU sample
-    start_s = imu_rows[0]["timestamp_s"] if imu_rows else 0.0
+    start_s = imu_samples[0].timestamp_s if imu_samples else 0.0
 
     # Log stereo first to obtain the logged timestamp window
     n_stereo, cam_t_first, cam_t_last = log_stereo_images(
-        cam0_entries, cam1_entries, cam0_dir, cam1_dir, start_s,
+        stereo_pairs, cam0_dir, cam1_dir, start_s,
         stride=image_stride, max_frames=max_frames,
     )
 
@@ -281,8 +215,8 @@ def main() -> None:
                 "Check that the dataset paths are correct and stereo CSVs are non-empty."
             )
         imu_to_log = [
-            r for r in imu_to_log
-            if cam_t_first <= r["timestamp_s"] <= cam_t_last
+            s for s in imu_to_log
+            if cam_t_first <= s.timestamp_s <= cam_t_last
         ]
 
     log_imu(imu_to_log, start_s)
@@ -292,17 +226,17 @@ def main() -> None:
         return t - start_s
 
     if cam_t_first is not None and cam_t_last is not None:
-        print(f"  Camera:  {len(cam0_entries):6d} read,  {n_stereo:6d} logged"
+        print(f"  Camera:  {len(stereo_pairs):6d} read,  {n_stereo:6d} logged"
               f"  [{rel(cam_t_first):.2f} – {rel(cam_t_last):.2f} s]")
     else:
-        print(f"  Camera:  {len(cam0_entries):6d} read,  {n_stereo:6d} logged")
-    imu_t_first = imu_to_log[0]["timestamp_s"]  if imu_to_log else None
-    imu_t_last  = imu_to_log[-1]["timestamp_s"] if imu_to_log else None
+        print(f"  Camera:  {len(stereo_pairs):6d} read,  {n_stereo:6d} logged")
+    imu_t_first = imu_to_log[0].timestamp_s  if imu_to_log else None
+    imu_t_last  = imu_to_log[-1].timestamp_s if imu_to_log else None
     if imu_t_first is not None and imu_t_last is not None:
-        print(f"  IMU:     {len(imu_rows):6d} read,  {len(imu_to_log):6d} logged"
+        print(f"  IMU:     {len(imu_samples):6d} read,  {len(imu_to_log):6d} logged"
               f"  [{rel(imu_t_first):.2f} – {rel(imu_t_last):.2f} s]")
     else:
-        print(f"  IMU:     {len(imu_rows):6d} read,  {len(imu_to_log):6d} logged")
+        print(f"  IMU:     {len(imu_samples):6d} read,  {len(imu_to_log):6d} logged")
     print(f"  Saved: {rrd_path}")
 
 
