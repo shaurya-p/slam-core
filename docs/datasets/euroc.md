@@ -54,6 +54,21 @@ timestamp [ns], filename
 
 Images are 752×480 grayscale PNG. Stereo baseline ~11 cm, left/right synchronized.
 
+## Rerun channels logged
+
+`scripts/rerun_euroc_debug.py` logs the following time-series channels (timeline: `time`, sequence-relative seconds):
+
+| Channel | Unit | Notes |
+|---|---|---|
+| `imu/gyro/x`, `y`, `z` | rad/s | Raw gyroscope components, body frame |
+| `imu/gyro/norm_radps` | rad/s | `‖ω‖` — total angular rate magnitude |
+| `imu/accel/x`, `y`, `z` | m/s² | Raw accelerometer components, body frame |
+| `imu/accel/norm_mps2` | m/s² | `‖a‖` — total specific force magnitude |
+| `imu/accel/norm_minus_gravity_mps2` | m/s² | `‖a‖ − 9.81`; near 0 when static and gravity-aligned |
+| `camera/cam0`, `cam1` | image | Grayscale stereo frames |
+
+`norm_minus_gravity_mps2` is a quick sanity signal: a near-zero mean indicates the IMU is gravity-dominated (static or slow motion). Deviations reveal dynamics or calibration offset.
+
 ## Configs
 
 Each sequence has a config under `configs/datasets/`:

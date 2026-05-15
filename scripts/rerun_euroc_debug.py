@@ -69,7 +69,7 @@ def resolve_sequence_root(dataset_root_arg: str | None, cfg: dict) -> Path:
 
 
 # ---------------------------------------------------------------------------
-# IMU reading and validation
+# IMU/Camera reading
 # ---------------------------------------------------------------------------
 
 def read_imu_csv(path: Path) -> list[dict]:
@@ -107,9 +107,6 @@ def validate_imu(rows: list[dict]) -> None:
         print(f"  IMU: {len(rows)} samples, all valid")
 
 
-# ---------------------------------------------------------------------------
-# Camera CSV reading
-# ---------------------------------------------------------------------------
 
 def read_cam_csv(path: Path) -> list[tuple[float, str]]:
     if not path.exists():
@@ -137,13 +134,19 @@ def log_imu(rows: list[dict], start_s: float) -> None:
     for r in rows:
         gx, gy, gz = r["gyro"]
         ax, ay, az = r["accel"]
+        gyro_norm          = math.sqrt(gx**2 + gy**2 + gz**2)
+        accel_norm         = math.sqrt(ax**2 + ay**2 + az**2)
+        accel_norm_minus_g = accel_norm - 9.81
         set_rerun_time(r["timestamp_s"], start_s)
-        rr.log("imu/gyro/x",  rr.Scalars(gx))
-        rr.log("imu/gyro/y",  rr.Scalars(gy))
-        rr.log("imu/gyro/z",  rr.Scalars(gz))
-        rr.log("imu/accel/x", rr.Scalars(ax))
-        rr.log("imu/accel/y", rr.Scalars(ay))
-        rr.log("imu/accel/z", rr.Scalars(az))
+        rr.log("imu/gyro/x",                        rr.Scalars(gx))
+        rr.log("imu/gyro/y",                        rr.Scalars(gy))
+        rr.log("imu/gyro/z",                        rr.Scalars(gz))
+        rr.log("imu/gyro/norm_radps",               rr.Scalars(gyro_norm))
+        rr.log("imu/accel/x",                       rr.Scalars(ax))
+        rr.log("imu/accel/y",                       rr.Scalars(ay))
+        rr.log("imu/accel/z",                       rr.Scalars(az))
+        rr.log("imu/accel/norm_mps2",               rr.Scalars(accel_norm))
+        rr.log("imu/accel/norm_minus_gravity_mps2",  rr.Scalars(accel_norm_minus_g))
 
 
 def log_stereo_images(
