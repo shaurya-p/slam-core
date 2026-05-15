@@ -56,18 +56,78 @@ Images are 752×480 grayscale PNG. Stereo baseline ~11 cm, left/right synchroniz
 
 ## Rerun channels logged
 
-`scripts/rerun_euroc_debug.py` logs the following time-series channels (timeline: `time`, sequence-relative seconds):
+`scripts/rerun_euroc_debug.py` logs the following channels (timeline: `time`, sequence-relative seconds):
 
-| Channel | Unit | Notes |
+| Entity path | Unit | Notes |
 |---|---|---|
 | `imu/gyro/x`, `y`, `z` | rad/s | Raw gyroscope components, body frame |
-| `imu/gyro/norm_radps` | rad/s | `‖ω‖` — total angular rate magnitude |
 | `imu/accel/x`, `y`, `z` | m/s² | Raw accelerometer components, body frame |
-| `imu/accel/norm_mps2` | m/s² | `‖a‖` — total specific force magnitude |
-| `imu/accel/norm_minus_gravity_mps2` | m/s² | `‖a‖ − 9.81`; near 0 when static and gravity-aligned |
+| `imu_derived/gyro_norm_radps` | rad/s | `‖ω‖` — total angular rate magnitude |
+| `imu_derived/accel_norm_mps2` | m/s² | `‖a‖` — total specific force magnitude |
+| `imu_derived/accel_norm_minus_gravity_mps2` | m/s² | `‖a‖ − 9.81`; near 0 when static and gravity-aligned |
 | `camera/cam0`, `cam1` | image | Grayscale stereo frames |
 
-`norm_minus_gravity_mps2` is a quick sanity signal: a near-zero mean indicates the IMU is gravity-dominated (static or slow motion). Deviations reveal dynamics or calibration offset.
+Raw channels are logged under `imu/`. Derived channels are under `imu_derived/` as a separate top-level entity so they appear as a distinct group in the Rerun tree.
+
+`accel_norm_minus_gravity_mps2` near zero indicates the IMU is gravity-dominated (static or slow motion). Deviations reveal dynamics or calibration offset.
+
+## Rerun blueprint workflow
+
+Rerun separates **data** from **layout**:
+
+- `.rrd` — the recording file. Contains all logged data (images, IMU scalars). Large; gitignored under `results/`.
+- `.rbl` — the blueprint file. Contains only the viewer panel layout. Small; committed under `configs/rerun/`.
+
+Committing the `.rbl` makes the dashboard reproducible across recordings and machines without re-arranging the viewer each time.
+
+### Step 1 — generate a debug recording
+
+```bash
+uv run python scripts/rerun_euroc_debug.py configs/datasets/euroc_mh01.yaml \
+  --dataset-root "$HOME/datasets" \
+  --max-frames 300 --image-stride 2 --imu-stride 2
+# Output: results/rerun/MH_01_easy_debug.rrd
+```
+
+### Step 2 — create the blueprint (one-time, manual)
+
+Open the recording in Rerun:
+
+```bash
+uv run rerun results/rerun/MH_01_easy_debug.rrd
+```
+
+Arrange the viewport into the following layout:
+
+```
+┌──────────────────────────────────────┐
+│  camera/cam0      camera/cam1        │  ← stereo images
+├──────────────────────────────────────┤
+│  imu_derived/gyro_norm_radps         │
+│  imu_derived/accel_norm_mps2         │  ← derived magnitudes
+│  imu_derived/accel_norm_minus_gravity│
+├───────────────────┬──────────────────┤
+│  imu/gyro/x       │  imu/accel/x     │
+│  imu/gyro/y       │  imu/accel/y     │  ← raw axes
+│  imu/gyro/z       │  imu/accel/z     │
+└───────────────────┴──────────────────┘
+```
+
+Save the layout via **File → Save blueprint** and write it to:
+
+```
+configs/rerun/euroc_imu_debug.rbl
+```
+
+Commit the `.rbl` file. It does not contain dataset images or IMU data — only panel positions and entity selections.
+
+### Step 3 — open any recording with the blueprint
+
+```bash
+uv run rerun results/rerun/MH_01_easy_debug.rrd configs/rerun/euroc_imu_debug.rbl
+```
+
+The blueprint applies to any `.rrd` that logs the same entity paths, so the same layout works across sequences and future recordings.
 
 ## Configs
 
