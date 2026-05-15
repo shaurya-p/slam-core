@@ -131,22 +131,26 @@ def set_rerun_time(t_s: float, start_s: float) -> None:
 
 
 def log_imu(rows: list[dict], start_s: float) -> None:
-    for r in rows:
+    for i, r in enumerate(rows):
         gx, gy, gz = r["gyro"]
         ax, ay, az = r["accel"]
         gyro_norm          = math.sqrt(gx**2 + gy**2 + gz**2)
         accel_norm         = math.sqrt(ax**2 + ay**2 + az**2)
         accel_norm_minus_g = accel_norm - 9.81
+        if i == 0:
+            print(f"  [imu_derived sample 0]  gyro_norm={gyro_norm:.4f} rad/s"
+                  f"  accel_norm={accel_norm:.4f} m/s²"
+                  f"  norm_minus_g={accel_norm_minus_g:.4f} m/s²")
         set_rerun_time(r["timestamp_s"], start_s)
-        rr.log("imu/gyro/x",                        rr.Scalars(gx))
-        rr.log("imu/gyro/y",                        rr.Scalars(gy))
-        rr.log("imu/gyro/z",                        rr.Scalars(gz))
-        rr.log("imu/gyro/norm_radps",               rr.Scalars(gyro_norm))
-        rr.log("imu/accel/x",                       rr.Scalars(ax))
-        rr.log("imu/accel/y",                       rr.Scalars(ay))
-        rr.log("imu/accel/z",                       rr.Scalars(az))
-        rr.log("imu/accel/norm_mps2",               rr.Scalars(accel_norm))
-        rr.log("imu/accel/norm_minus_gravity_mps2",  rr.Scalars(accel_norm_minus_g))
+        rr.log("imu/gyro/x",                                  rr.Scalars(gx))
+        rr.log("imu/gyro/y",                                  rr.Scalars(gy))
+        rr.log("imu/gyro/z",                                  rr.Scalars(gz))
+        rr.log("imu/accel/x",                                 rr.Scalars(ax))
+        rr.log("imu/accel/y",                                 rr.Scalars(ay))
+        rr.log("imu/accel/z",                                 rr.Scalars(az))
+        rr.log("imu_derived/gyro_norm_radps",                 rr.Scalars(gyro_norm))
+        rr.log("imu_derived/accel_norm_mps2",                 rr.Scalars(accel_norm))
+        rr.log("imu_derived/accel_norm_minus_gravity_mps2",   rr.Scalars(accel_norm_minus_g))
 
 
 def log_stereo_images(
