@@ -12,3 +12,7 @@ gtest_discover_tests(test_geometry)
 add_executable(test_imu test_imu.cpp)
 target_link_libraries(test_imu PRIVATE GTest::gtest_main slam_core)
 gtest_discover_tests(test_imu)
+
+add_executable(test_gyro_propagation test_gyro_propagation.cpp)
+target_link_libraries(test_gyro_propagation PRIVATE GTest::gtest_main slam_core)
+gtest_discover_tests(test_gyro_propagation)

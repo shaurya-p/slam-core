@@ -1,0 +1,2 @@
+add_executable(export_gyro_propagation export_gyro_propagation.cpp)
+target_link_libraries(export_gyro_propagation PRIVATE slam_core)
