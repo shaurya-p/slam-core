@@ -116,9 +116,12 @@ def set_rerun_time(t_s: float, start_s: float) -> None:
     rr.set_time("time", duration=t_s - start_s)
 
 
-def log_gyro(samples, start_s: float, stride: int) -> int:
+def log_gyro(samples, start_s: float, stride: int,
+             max_duration_s: float | None = None) -> int:
     logged = 0
     for i, s in enumerate(samples):
+        if max_duration_s is not None and s.timestamp_s - start_s > max_duration_s:
+            break  # samples are chronologically ordered
         if i % stride != 0:
             continue
         gx, gy, gz = s.gyro_radps
@@ -131,10 +134,12 @@ def log_gyro(samples, start_s: float, stride: int) -> int:
 
 
 def log_orientations(rows: list[tuple[float, list[float]]], start_s: float,
-                     stride: int) -> int:
+                     stride: int, max_duration_s: float | None = None) -> int:
     """Log RPY scalars and body-frame arrows at the given stride."""
     logged = 0
     for i, (ts, mat) in enumerate(rows):
+        if max_duration_s is not None and ts - start_s > max_duration_s:
+            break  # rows are chronologically ordered
         if i % stride != 0:
             continue
         roll, pitch, yaw = rpy_from_row_major(mat)
@@ -191,6 +196,10 @@ def main() -> None:
         "--frame-stride", type=int, default=50, metavar="N",
         help="Log every Nth orientation row for RPY + body frame (default: 50)",
     )
+    parser.add_argument(
+        "--max-duration-s", type=float, default=None, metavar="FLOAT",
+        help="Only log samples where timestamp_s - start_s <= this value (default: full sequence)",
+    )
     args = parser.parse_args()
 
     print(_DRIFT_WARNING)
@@ -227,11 +236,14 @@ def main() -> None:
 
     start_s = imu_samples[0].timestamp_s if imu_samples else 0.0
 
-    n_gyro   = log_gyro(imu_samples, start_s, args.imu_stride)
-    n_orient = log_orientations(orient_rows, start_s, args.frame_stride)
+    max_dur = args.max_duration_s
+    n_gyro   = log_gyro(imu_samples, start_s, args.imu_stride, max_dur)
+    n_orient = log_orientations(orient_rows, start_s, args.frame_stride, max_dur)
 
     print(f"  Gyro logged:        {n_gyro} samples  (stride {args.imu_stride})")
     print(f"  Orientation logged: {n_orient} frames  (stride {args.frame_stride})")
+    if max_dur is not None:
+        print(f"  Max duration:       {max_dur} s")
     print(f"  Saved: {rrd_path}")
 
 
