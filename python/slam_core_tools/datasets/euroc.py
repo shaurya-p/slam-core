@@ -36,6 +36,15 @@ class StereoPair:
     filename_cam1: str    # relative to cam1 image directory
 
 
+@dataclass(frozen=True)
+class GroundTruthSample:
+    timestamp_s: float  # seconds
+    q_w: float          # quaternion scalar part (q_RS_w, Hamilton convention)
+    q_x: float          # quaternion vector part
+    q_y: float
+    q_z: float
+
+
 def load_config(config_path: Path) -> dict:
     if not config_path.exists():
         raise FileNotFoundError(f"Config not found: {config_path}")
@@ -133,6 +142,38 @@ def read_cam_csv(path: Path) -> list[CameraFrame]:
                 filename=filename,
             ))
     return frames
+
+
+def read_groundtruth_csv(path: Path) -> list[GroundTruthSample]:
+    """Parse a EuRoC ground-truth CSV into GroundTruthSample records.
+
+    Column layout (by index):
+      0: timestamp_ns
+      1-3: position (ignored)
+      4: q_RS_w, 5: q_RS_x, 6: q_RS_y, 7: q_RS_z  (Hamilton convention)
+      8+: velocity, biases (ignored)
+
+    Raises:
+        FileNotFoundError: if the CSV does not exist.
+    """
+    if not path.exists():
+        raise FileNotFoundError(f"Ground-truth CSV not found: {path}")
+    samples = []
+    with open(path) as f:
+        reader = csv.reader(f)
+        next(reader)  # skip header
+        for line in reader:
+            cols = [x.strip() for x in line]
+            if len(cols) < 8:
+                continue
+            samples.append(GroundTruthSample(
+                timestamp_s=float(cols[0]) * 1e-9,
+                q_w=float(cols[4]),
+                q_x=float(cols[5]),
+                q_y=float(cols[6]),
+                q_z=float(cols[7]),
+            ))
+    return samples
 
 
 def associate_stereo_pairs(
