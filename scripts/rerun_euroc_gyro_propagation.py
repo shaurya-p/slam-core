@@ -179,9 +179,9 @@ def log_gyro(samples, start_s: float, stride: int,
             continue
         gx, gy, gz = s.gyro_radps
         set_rerun_time(s.timestamp_s, start_s)
-        rr.log("imu/gyro/x", rr.Scalars(gx))
-        rr.log("imu/gyro/y", rr.Scalars(gy))
-        rr.log("imu/gyro/z", rr.Scalars(gz))
+        # rr.log("imu/gyro/x", rr.Scalars(gx))
+        # rr.log("imu/gyro/y", rr.Scalars(gy))
+        # rr.log("imu/gyro/z", rr.Scalars(gz))
         logged += 1
     return logged
 
@@ -227,13 +227,16 @@ def log_orientations(
         roll,    pitch,    yaw    = rpy_from_mat(R_est_rel)
         roll_gt, pitch_gt, yaw_gt = rpy_from_mat(R_gt_rel)
 
+        # ZYX error components (interpretability only — geodesic_deg is the main metric)
+        roll_err_rad, pitch_err_rad, yaw_err_rad = rpy_from_mat(R_err)
+
         set_rerun_time(ts, start_s)
 
         # Estimated orientation (relative to reference)
         # x-axis: red (full length); y/z: light gray (shorter, orientation context only)
-        rr.log("orientation/roll_rad",  rr.Scalars(roll))
-        rr.log("orientation/pitch_rad", rr.Scalars(pitch))
-        rr.log("orientation/yaw_rad",   rr.Scalars(yaw))
+        # rr.log("orientation/roll_rad",  rr.Scalars(roll))
+        # rr.log("orientation/pitch_rad", rr.Scalars(pitch))
+        # rr.log("orientation/yaw_rad",   rr.Scalars(yaw))
         rr.log("orientation/body_frame",
                rr.Arrows3D(
                    origins=[[0, 0, 0], [0, 0, 0], [0, 0, 0]],
@@ -247,9 +250,9 @@ def log_orientations(
 
         # GT orientation (relative to reference)
         # x-axis: blue (full length); y/z: dark gray (shorter)
-        rr.log("orientation_gt/roll_rad",  rr.Scalars(roll_gt))
-        rr.log("orientation_gt/pitch_rad", rr.Scalars(pitch_gt))
-        rr.log("orientation_gt/yaw_rad",   rr.Scalars(yaw_gt))
+        # rr.log("orientation_gt/roll_rad",  rr.Scalars(roll_gt))
+        # rr.log("orientation_gt/pitch_rad", rr.Scalars(pitch_gt))
+        # rr.log("orientation_gt/yaw_rad",   rr.Scalars(yaw_gt))
         rr.log("orientation/body_frame_gt",
                rr.Arrows3D(
                    origins=[[0, 0, 0], [0, 0, 0], [0, 0, 0]],
@@ -261,8 +264,11 @@ def log_orientations(
                    colors=[_GT_X_COLOR, _GT_AUX_COLOR, _GT_AUX_COLOR],
                ))
 
-        # Geodesic error
-        rr.log("orientation/error_deg", rr.Scalars(err_deg))
+        # Orientation error scalar plots
+        rr.log("orientation_error/geodesic_deg", rr.Scalars(err_deg))
+        rr.log("orientation_error/roll_deg",  rr.Scalars(roll_err_rad  * 180.0 / math.pi))
+        rr.log("orientation_error/pitch_deg", rr.Scalars(pitch_err_rad * 180.0 / math.pi))
+        rr.log("orientation_error/yaw_deg",   rr.Scalars(yaw_err_rad   * 180.0 / math.pi))
 
         logged += 1
     return logged, error_degs
