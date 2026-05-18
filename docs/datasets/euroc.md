@@ -54,7 +54,7 @@ timestamp [ns], filename
 
 Images are 752×480 grayscale PNG. Stereo baseline ~11 cm, left/right synchronized.
 
-## Rerun channels logged
+## Rerun channels — debug script
 
 `scripts/rerun_euroc_debug.py` logs the following channels (timeline: `time`, sequence-relative seconds):
 
@@ -70,6 +70,40 @@ Images are 752×480 grayscale PNG. Stereo baseline ~11 cm, left/right synchroniz
 Raw channels are logged under `imu/`. Derived channels are under `imu_derived/` as a separate top-level entity so they appear as a distinct group in the Rerun tree.
 
 `accel_norm_minus_gravity_mps2` near zero indicates the IMU is gravity-dominated (static or slow motion). Deviations reveal dynamics or calibration offset.
+
+## Rerun channels — gyro propagation visualization
+
+First export the orientation CSV from the C++ tool:
+
+```bash
+./build/tools/export_gyro_propagation \
+  "$HOME/datasets/euroc/MH_01_easy/mav0/imu0/data.csv" \
+  results/imu/MH_01_easy_gyro_orientations.csv
+```
+
+Then run the visualization:
+
+```bash
+uv run python scripts/rerun_euroc_gyro_propagation.py \
+  configs/datasets/euroc_mh01.yaml \
+  results/imu/MH_01_easy_gyro_orientations.csv \
+  --dataset-root "$HOME/datasets" \
+  --imu-stride 1 --frame-stride 5 --max-duration-s 30
+# Output: results/rerun/MH_01_easy_gyro_propagation.rrd
+```
+
+`scripts/rerun_euroc_gyro_propagation.py` logs the following channels:
+
+| Entity path | Unit | Notes |
+|---|---|---|
+| `orientation/body_frame` | — | 3D arrows: estimated x-axis (red, full length), y/z (gray, shorter) |
+| `orientation/body_frame_gt` | — | 3D arrows: GT x-axis (blue, full length), y/z (gray, shorter) |
+| `orientation_error/geodesic_deg` | deg | SO(3) geodesic angle between estimated and GT rotation |
+| `orientation_error/roll_deg` | deg | ZYX roll error component |
+| `orientation_error/pitch_deg` | deg | ZYX pitch error component |
+| `orientation_error/yaw_deg` | deg | ZYX yaw error component |
+
+All orientations and errors are relative to the first estimated/GT pair as reference (both frames coincide at t=0). GT is from `mav0/state_groundtruth_estimate0/data.csv`, matched by nearest-neighbor timestamp lookup. Gyro-only propagation has no gravity alignment, no accelerometer fusion, and no bias correction — drift is expected.
 
 ## Rerun blueprint workflow
 

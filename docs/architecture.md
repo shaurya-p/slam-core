@@ -1,63 +1,49 @@
 # Architecture
 
-## System Overview
+## Implemented
 
-slam-core is a modular Visual-Inertial SLAM pipeline. Components are layered to allow independent development and testing.
+### Geometry (`src/geometry/`, `include/slam_core/geometry/`)
 
-## Layers
+- `skew`, `so3_exp`, `so3_log`, `is_valid_rotation`
+- `SE3::compose`, `SE3::inverse`, `SE3::apply`
 
-### 1. Input
+### IMU (`src/imu/`, `include/slam_core/imu/`)
 
-- Calibrated monocular or stereo camera.
-- IMU at high frequency (100–400 Hz).
-- Inputs synchronized, timestamped, and validated at system boundary.
+- `ImuMeasurement` — timestamped gyro + accel with finite-value validation
+- `propagate_gyro(R_W_B, gyro_radps, dt_s)` — zeroth-order-hold SO(3) integration
 
-### 2. Geometric Frontend
+### Python tooling (`python/slam_core_tools/datasets/euroc`)
 
-- Feature detection and tracking (e.g., FAST + LK optical flow or descriptor matching).
-- Feature track manager: per-feature lifetime, reprojection bookkeeping.
-- Outlier rejection via RANSAC on essential matrix or homography.
+- EuRoC CSV loaders: `ImuSample`, `CameraFrame`, `StereoPair`, `GroundTruthSample`
+- `read_imu_csv`, `read_cam_csv`, `associate_stereo_pairs`, `read_groundtruth_csv`
+- `load_config`, `resolve_sequence_root`, `validate_imu`
 
-### 3. IMU Preintegration
+### Tools (`tools/`)
 
-- On-manifold preintegration (Forster et al.).
-- Bias tracking.
-- Covariance propagation.
-- Preintegrated measurement exposed as a factor input.
+- `export_gyro_propagation` — reads EuRoC IMU CSV, integrates orientation, writes row-major `R_W_B` CSV
 
-### 4. Fixed-Lag VIO Backend
+### Visualization (`scripts/`)
 
-- Sliding-window estimator.
-- IMU preintegration factors + visual reprojection factors.
-- Marginalization of old states.
+- `rerun_euroc_debug.py` — stereo images, raw IMU, derived IMU channels
+- `rerun_euroc_gyro_propagation.py` — estimated vs GT 3D orientation arrows, geodesic error, RPY error components
 
-### 5. GTSAM / iSAM2 Pose Graph Layer
+## Key conventions
 
-- Loop closure integration via pose graph.
-- iSAM2 incremental updates.
-- Loop candidates provided externally (see Learned Modules).
+- Poses: `T_A_B` maps points from frame B into frame A. `T_A_C = T_A_B.compose(T_B_C)`.
+- IMU: body frame. `R_W_B` maps body frame B into world frame W.
+- Camera: Z-forward, X-right, Y-down (OpenCV convention).
+- Gravity: −Z in world frame.
+- Time: float64 seconds throughout.
+- Gyro: rad/s, body frame. Accel: m/s², body frame.
 
-### 6. Learned Modules (Optional)
+## Planned direction
 
-- Learned modules are measurement/candidate providers only.
-- They do not directly mutate estimator state.
-- Examples: depth priors, place recognition for loop closure candidates.
-- All outputs logged with latency, confidence, accept/reject status.
+The next goal is to complete the IMU foundation before moving to camera or factor-graph work:
 
-### 7. Visualization
+1. Gyro bias handling — bias-corrected orientation propagation
+2. Gravity initialization / alignment — accelerometer-based world-frame alignment
+3. Full IMU state propagation — position, velocity, orientation, biases
+4. IMU preintegration — between-keyframe preintegrated measurements for use as IMU factors
+5. Visual-inertial factor graph — reprojection factors + IMU factors (requires 1–4)
 
-- Rerun for trajectory, landmarks, residuals, covariance.
-- Visual outputs logged for debugging and publication.
-
-### 8. Deployment (Future)
-
-- ROS2 integration.
-- Real-time mode.
-
-## Key Conventions
-
-- Poses: T_world_body (SE(3)).
-- IMU: body frame.
-- Camera: OpenCV convention (Z-forward, X-right, Y-down).
-- Gravity: -Z in world frame.
-- Time: float64 seconds.
+Feature detection and tracking, fixed-lag VIO backend, GTSAM/iSAM2 pose graph, loop closure, and ROS2 integration are not yet started.
