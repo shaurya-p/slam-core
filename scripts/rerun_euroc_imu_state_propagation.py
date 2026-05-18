@@ -186,7 +186,15 @@ def log_imu_state(
     # Pre-build GT index once to avoid rebuilding per row in the loop.
     gt_times: list[float] = [s.timestamp_s for s in gt_samples] if gt_samples else []
 
+    first_est_p = np.array([rows[0]["p_x"], rows[0]["p_y"], rows[0]["p_z"]])
+    first_gt_p: np.ndarray | None = None
+    if gt_samples:
+        _gt0 = _nearest_by_index(rows[0]["timestamp_s"], gt_samples, gt_times)
+        first_gt_p = np.array([_gt0.p_x, _gt0.p_y, _gt0.p_z])
+
     est_positions: list[list[float]] = []
+    est_debug_positions: list[list[float]] = []
+    gt_debug_positions:  list[list[float]] = []
     n_scalars = 0
     n_frames  = 0
 
@@ -203,6 +211,7 @@ def log_imu_state(
             [row["r20"], row["r21"], row["r22"]],
         ])
         est_positions.append(p.tolist())
+        est_debug_positions.append((p - first_est_p).tolist())
         _set_time(ts, start_s)
 
         # Estimated scalar plots (always present, including CSV-only mode)
@@ -227,6 +236,8 @@ def log_imu_state(
             gt = _nearest_by_index(ts, gt_samples, gt_times)
             gt_p = np.array([gt.p_x, gt.p_y, gt.p_z])
             gt_v = np.array([gt.v_x, gt.v_y, gt.v_z])
+            if first_gt_p is not None:
+                gt_debug_positions.append((gt_p - first_gt_p).tolist())
 
             # Normalize quaternion before converting to rotation matrix
             q_norm = math.sqrt(gt.q_w**2 + gt.q_x**2 + gt.q_y**2 + gt.q_z**2)
@@ -268,6 +279,13 @@ def log_imu_state(
         if len(gt_positions) >= 2:
             rr.log("ground_truth/trajectory",
                    rr.LineStrips3D([gt_positions]), static=True)
+
+    if len(est_debug_positions) >= 2:
+        rr.log("debug/estimated_trajectory",
+               rr.LineStrips3D([est_debug_positions]), static=True)
+    if gt_samples and len(gt_debug_positions) >= 2:
+        rr.log("debug/ground_truth_trajectory",
+               rr.LineStrips3D([gt_debug_positions]), static=True)
 
     return n_scalars, n_frames
 
