@@ -1,5 +1,6 @@
 #include <gtest/gtest.h>
 #include <Eigen/Core>
+#include <Eigen/Geometry>
 #include <cmath>
 #include <limits>
 #include <stdexcept>
@@ -8,6 +9,7 @@
 #include "slam_core/geometry/so3.hpp"
 
 using slam_core::imu::propagate_gyro;
+using slam_core::imu::propagate_gyro_bias_corrected;
 using slam_core::geometry::exp_so3;
 using slam_core::geometry::is_valid_rotation;
 
@@ -63,6 +65,70 @@ TEST(GyroPropagation, InvalidDtThrows) {
     EXPECT_THROW(propagate_gyro(R, gyro, kNaN),  std::invalid_argument);
     EXPECT_THROW(propagate_gyro(R, gyro,  kInf), std::invalid_argument);
     EXPECT_THROW(propagate_gyro(R, gyro, -kInf), std::invalid_argument);
+}
+
+// --- bias-corrected: zero bias matches propagate_gyro ---
+
+TEST(GyroBiasCorrectedPropagation, ZeroBiasMatchesPropagateGyro) {
+    const Eigen::Matrix3d R = exp_so3({0.3, -0.5, 0.8});
+    const Eigen::Vector3d gyro{0.1, -0.2, 0.3};
+    const Eigen::Matrix3d result =
+        propagate_gyro_bias_corrected(R, gyro, Eigen::Vector3d::Zero(), 0.01);
+    const Eigen::Matrix3d expected = propagate_gyro(R, gyro, 0.01);
+    EXPECT_TRUE(result.isApprox(expected, 1e-12));
+}
+
+// --- bias-corrected: full bias leaves orientation unchanged ---
+
+TEST(GyroBiasCorrectedPropagation, FullBiasLeavesOrientationUnchanged) {
+    // gyro == bias -> corrected rate is zero -> R_W_B unchanged
+    const Eigen::Matrix3d R = exp_so3({0.3, -0.5, 0.8});
+    const Eigen::Vector3d gyro{0.4, -0.1, 0.7};
+    const Eigen::Matrix3d result =
+        propagate_gyro_bias_corrected(R, gyro, gyro, 0.05);
+    EXPECT_TRUE(result.isApprox(R, 1e-12));
+}
+
+// --- bias-corrected: partial bias produces expected rotation ---
+
+TEST(GyroBiasCorrectedPropagation, PartialBiasProducesExpectedRotation) {
+    // gyro = [0, 0, 1.0] rad/s, bias = [0, 0, 0.25] rad/s, dt = 2.0 s
+    // corrected rate = [0, 0, 0.75] rad/s -> angle = 0.75 * 2.0 = 1.5 rad about +z
+    const Eigen::Vector3d gyro{0.0, 0.0, 1.0};
+    const Eigen::Vector3d bias{0.0, 0.0, 0.25};
+    const Eigen::Matrix3d result =
+        propagate_gyro_bias_corrected(Eigen::Matrix3d::Identity(), gyro, bias, 2.0);
+    const Eigen::Matrix3d expected =
+        Eigen::AngleAxisd(1.5, Eigen::Vector3d::UnitZ()).toRotationMatrix();
+    EXPECT_TRUE(result.isApprox(expected, 1e-9));
+}
+
+// --- bias-corrected: invalid dt throws ---
+
+TEST(GyroBiasCorrectedPropagation, InvalidDtThrows) {
+    const Eigen::Matrix3d R  = Eigen::Matrix3d::Identity();
+    const Eigen::Vector3d gyro{0.0, 0.0, 1.0};
+    const Eigen::Vector3d bias = Eigen::Vector3d::Zero();
+    constexpr double kNaN = std::numeric_limits<double>::quiet_NaN();
+    constexpr double kInf = std::numeric_limits<double>::infinity();
+
+    EXPECT_THROW(propagate_gyro_bias_corrected(R, gyro, bias, 0.0),   std::invalid_argument);
+    EXPECT_THROW(propagate_gyro_bias_corrected(R, gyro, bias, -1.0),  std::invalid_argument);
+    EXPECT_THROW(propagate_gyro_bias_corrected(R, gyro, bias, kNaN),  std::invalid_argument);
+    EXPECT_THROW(propagate_gyro_bias_corrected(R, gyro, bias,  kInf), std::invalid_argument);
+    EXPECT_THROW(propagate_gyro_bias_corrected(R, gyro, bias, -kInf), std::invalid_argument);
+}
+
+// --- bias-corrected: rotation validity ---
+
+TEST(GyroBiasCorrectedPropagation, OutputIsValidRotationAfterManySteps) {
+    const Eigen::Vector3d gyro{0.3, -0.7, 1.1};
+    const Eigen::Vector3d bias{0.05, -0.1, 0.2};
+    Eigen::Matrix3d R = Eigen::Matrix3d::Identity();
+    for (int i = 0; i < 5000; ++i) {
+        R = propagate_gyro_bias_corrected(R, gyro, bias, 0.005);
+    }
+    EXPECT_TRUE(is_valid_rotation(R, 1e-6));
 }
 
 // --- rotation validity ---
