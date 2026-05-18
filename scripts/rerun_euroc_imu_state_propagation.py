@@ -18,16 +18,24 @@ CSV columns:
 
 Propagation is NOT recomputed here.
 
-Usage:
+Usage (CSV-only):
+    uv run python scripts/rerun_euroc_imu_state_propagation.py \\
+      results/imu/MH_01_easy_imu_state.csv
+
+Usage (with GT comparison):
     uv run python scripts/rerun_euroc_imu_state_propagation.py \\
       results/imu/MH_01_easy_imu_state.csv \\
+      --config configs/datasets/euroc_mh01.yaml \\
+      --dataset-root "$HOME/datasets" \\
       --frame-stride 50 \\
       --max-duration-s 30 \\
-      --output results/rerun/MH_01_easy_imu_state_propagation.rrd
+      --output results/rerun/MH_01_easy_imu_state_vs_gt.rrd
 """
 
 import argparse
+import bisect
 import csv
+import math
 import sys
 from pathlib import Path
 
@@ -49,12 +57,14 @@ _EXPECTED_COLS = {
     "r20", "r21", "r22",
 }
 
-# Body-frame axis colors (same convention as gyro visualization)
-_EST_X_COLOR   = [255,   0,   0]  # x-axis: red
-_EST_AUX_COLOR = [170, 170, 170]  # y/z-axes: light gray
+# Estimated: red x-axis, gray y/z (same palette as gyro visualization)
+_EST_X_COLOR   = [255,   0,   0]
+_EST_AUX_COLOR = [170, 170, 170]
+# GT: blue x-axis, dark gray y/z (same palette as gyro visualization)
+_GT_X_COLOR    = [  0,   0, 255]
+_GT_AUX_COLOR  = [ 90,  90,  90]
 
-_MAIN_AXIS_LENGTH = 1.0
-_AUX_AXIS_LENGTH  = 0.45
+_AUX_SCALE = 0.45  # y/z axis length as fraction of main axis length
 
 
 # ---------------------------------------------------------------------------
@@ -85,26 +95,98 @@ def load_state_csv(csv_path: Path) -> list[dict]:
 
 
 # ---------------------------------------------------------------------------
+# Local geometry helpers (visualization utilities only, not algorithm logic)
+# ---------------------------------------------------------------------------
+
+def _quat_to_mat(w: float, x: float, y: float, z: float) -> np.ndarray:
+    """3x3 rotation matrix from unit quaternion (Hamilton convention, w scalar first).
+
+    Same implementation as the gyro propagation visualization.
+    """
+    return np.array([
+        [1 - 2*(y*y + z*z),  2*(x*y - w*z),      2*(x*z + w*y)],
+        [2*(x*y + w*z),      1 - 2*(x*x + z*z),   2*(y*z - w*x)],
+        [2*(x*z - w*y),      2*(y*z + w*x),        1 - 2*(x*x + y*y)],
+    ])
+
+
+def _geodesic_deg(R_err: np.ndarray) -> float:
+    """SO(3) geodesic angle in degrees from R_err = R_gt.T @ R_est.
+
+    Same convention as the gyro propagation visualization.
+    """
+    cos_angle = (np.trace(R_err) - 1.0) / 2.0
+    return math.acos(max(-1.0, min(1.0, float(cos_angle)))) * 180.0 / math.pi
+
+
+# ---------------------------------------------------------------------------
 # Rerun helpers
 # ---------------------------------------------------------------------------
 
-def set_rerun_time(t_s: float, start_s: float) -> None:
+def _set_time(t_s: float, start_s: float) -> None:
     rr.set_time("time", duration=t_s - start_s)
 
+
+def _log_axes(entity: str, R: np.ndarray, length: float,
+              x_color: list[int], aux_color: list[int]) -> None:
+    rr.log(
+        entity,
+        rr.Arrows3D(
+            origins=[[0, 0, 0], [0, 0, 0], [0, 0, 0]],
+            vectors=[
+                R[:, 0] * length,
+                R[:, 1] * length * _AUX_SCALE,
+                R[:, 2] * length * _AUX_SCALE,
+            ],
+            colors=[x_color, aux_color, aux_color],
+        ),
+    )
+
+
+def _nearest_by_index(ts: float, samples: list, times: list[float]):
+    """Nearest-neighbor using a pre-built sorted times list.
+
+    Callers build times once before a loop to avoid O(n) rebuilding per call.
+    Equivalent to nearest_gt_sample(ts, samples) but reuses an existing index.
+    """
+    idx = bisect.bisect_left(times, ts)
+    if idx == 0:
+        return samples[0]
+    if idx >= len(samples):
+        return samples[-1]
+    if ts - times[idx - 1] <= times[idx] - ts:
+        return samples[idx - 1]
+    return samples[idx]
+
+
+# ---------------------------------------------------------------------------
+# Logging
+# ---------------------------------------------------------------------------
 
 def log_imu_state(
     rows: list[dict],
     start_s: float,
     frame_stride: int,
     max_duration_s: float | None,
+    axis_length: float,
+    gt_samples: list | None = None,
 ) -> tuple[int, int]:
-    """Log scalar plots for all rows and body-frame axes at stride.
+    """Log estimated state and optional GT comparison to Rerun.
 
-    Full trajectory is logged as a static line strip after the loop.
+    Always logs:
+      imu_state/* scalar plots, estimated/trajectory, estimated/body_frame
+
+    When gt_samples is provided, also logs:
+      ground_truth/trajectory, ground_truth/body_frame,
+      error/position_{x,y,z,norm}_m, error/velocity_norm_mps,
+      error/orientation_geodesic_deg, ground_truth/velocity_norm_mps
 
     Returns (scalar_rows_logged, body_frames_logged).
     """
-    all_positions: list[list[float]] = []
+    # Pre-build GT index once to avoid rebuilding per row in the loop.
+    gt_times: list[float] = [s.timestamp_s for s in gt_samples] if gt_samples else []
+
+    est_positions: list[list[float]] = []
     n_scalars = 0
     n_frames  = 0
 
@@ -113,12 +195,17 @@ def log_imu_state(
         if max_duration_s is not None and ts - start_s > max_duration_s:
             break
 
-        p = np.array([row["p_x"], row["p_y"], row["p_z"]])
-        v = np.array([row["v_x"], row["v_y"], row["v_z"]])
-        all_positions.append(p.tolist())
+        p     = np.array([row["p_x"], row["p_y"], row["p_z"]])
+        v     = np.array([row["v_x"], row["v_y"], row["v_z"]])
+        R_est = np.array([
+            [row["r00"], row["r01"], row["r02"]],
+            [row["r10"], row["r11"], row["r12"]],
+            [row["r20"], row["r21"], row["r22"]],
+        ])
+        est_positions.append(p.tolist())
+        _set_time(ts, start_s)
 
-        set_rerun_time(ts, start_s)
-
+        # Estimated scalar plots (always present, including CSV-only mode)
         rr.log("imu_state/position_x_m",      rr.Scalars(p[0]))
         rr.log("imu_state/position_y_m",      rr.Scalars(p[1]))
         rr.log("imu_state/position_z_m",      rr.Scalars(p[2]))
@@ -129,33 +216,58 @@ def log_imu_state(
         rr.log("imu_state/velocity_norm_mps", rr.Scalars(float(np.linalg.norm(v))))
         n_scalars += 1
 
+        # Estimated body-frame axes at stride
         if i % frame_stride == 0:
-            R = np.array([
-                [row["r00"], row["r01"], row["r02"]],
-                [row["r10"], row["r11"], row["r12"]],
-                [row["r20"], row["r21"], row["r22"]],
-            ])
-            rr.log(
-                "orientation/body_frame",
-                rr.Arrows3D(
-                    origins=[[0, 0, 0], [0, 0, 0], [0, 0, 0]],
-                    vectors=[
-                        R[:, 0] * _MAIN_AXIS_LENGTH,
-                        R[:, 1] * _AUX_AXIS_LENGTH,
-                        R[:, 2] * _AUX_AXIS_LENGTH,
-                    ],
-                    colors=[_EST_X_COLOR, _EST_AUX_COLOR, _EST_AUX_COLOR],
-                ),
-            )
+            _log_axes("estimated/body_frame", R_est, axis_length,
+                      _EST_X_COLOR, _EST_AUX_COLOR)
             n_frames += 1
 
-    # Log full trajectory as a static line strip (not time-varying).
-    if len(all_positions) >= 2:
-        rr.log(
-            "imu_state/trajectory",
-            rr.LineStrips3D([all_positions]),
-            static=True,
-        )
+        # GT comparison (only when GT was loaded)
+        if gt_samples:
+            gt = _nearest_by_index(ts, gt_samples, gt_times)
+            gt_p = np.array([gt.p_x, gt.p_y, gt.p_z])
+            gt_v = np.array([gt.v_x, gt.v_y, gt.v_z])
+
+            # Normalize quaternion before converting to rotation matrix
+            q_norm = math.sqrt(gt.q_w**2 + gt.q_x**2 + gt.q_y**2 + gt.q_z**2)
+            if q_norm < 1e-10:
+                continue
+            R_gt = _quat_to_mat(
+                gt.q_w / q_norm, gt.q_x / q_norm,
+                gt.q_y / q_norm, gt.q_z / q_norm,
+            )
+
+            p_err = p - gt_p
+            v_err = v - gt_v
+            rr.log("error/position_x_m",          rr.Scalars(p_err[0]))
+            rr.log("error/position_y_m",          rr.Scalars(p_err[1]))
+            rr.log("error/position_z_m",          rr.Scalars(p_err[2]))
+            rr.log("error/position_norm_m",       rr.Scalars(float(np.linalg.norm(p_err))))
+            rr.log("error/velocity_norm_mps",     rr.Scalars(float(np.linalg.norm(v_err))))
+            rr.log("ground_truth/velocity_norm_mps",
+                   rr.Scalars(float(np.linalg.norm(gt_v))))
+
+            # Orientation error: R_err = R_gt.T @ R_est
+            # Same geodesic convention as the gyro propagation visualization.
+            R_err = R_gt.T @ R_est
+            rr.log("error/orientation_geodesic_deg", rr.Scalars(_geodesic_deg(R_err)))
+
+            if i % frame_stride == 0:
+                _log_axes("ground_truth/body_frame", R_gt, axis_length,
+                          _GT_X_COLOR, _GT_AUX_COLOR)
+
+    # Static trajectory strips (logged after the time-series loop)
+    if len(est_positions) >= 2:
+        rr.log("estimated/trajectory", rr.LineStrips3D([est_positions]), static=True)
+
+    if gt_samples:
+        gt_positions = [
+            [s.p_x, s.p_y, s.p_z] for s in gt_samples
+            if max_duration_s is None or s.timestamp_s - start_s <= max_duration_s
+        ]
+        if len(gt_positions) >= 2:
+            rr.log("ground_truth/trajectory",
+                   rr.LineStrips3D([gt_positions]), static=True)
 
     return n_scalars, n_frames
 
@@ -173,8 +285,20 @@ def main() -> None:
         help="State CSV exported by export_imu_state_propagation",
     )
     parser.add_argument(
+        "--config", metavar="PATH",
+        help="EuRoC sequence config YAML; enables GT comparison mode",
+    )
+    parser.add_argument(
+        "--dataset-root", metavar="PATH",
+        help="Parent directory containing euroc/<sequence>/",
+    )
+    parser.add_argument(
         "--frame-stride", type=int, default=50, metavar="N",
         help="Log body-frame axes every Nth row (default: 50)",
+    )
+    parser.add_argument(
+        "--axis-length", type=float, default=1.0, metavar="FLOAT",
+        help="Length of the main body-frame axis arrow (default: 1.0)",
     )
     parser.add_argument(
         "--max-duration-s", type=float, default=None, metavar="FLOAT",
@@ -198,6 +322,31 @@ def main() -> None:
     if not rows:
         sys.exit("Error: state CSV is empty")
 
+    # Optional GT loading — only when --config is provided
+    gt_samples = None
+    if args.config:
+        from slam_core_tools.datasets.euroc import (
+            load_config,
+            nearest_gt_sample,  # imported to confirm availability; lookup uses _nearest_by_index
+            read_groundtruth_csv,
+            resolve_sequence_root,
+        )
+        try:
+            cfg      = load_config(Path(args.config))
+            seq_root = resolve_sequence_root(args.dataset_root, cfg)
+        except (FileNotFoundError, ValueError) as e:
+            sys.exit(f"Error: {e}")
+
+        gt_csv = seq_root / "mav0/state_groundtruth_estimate0/data.csv"
+        try:
+            gt_samples = read_groundtruth_csv(gt_csv)
+        except FileNotFoundError:
+            sys.exit(
+                f"Error: Ground-truth CSV not found: {gt_csv}\n"
+                f"Expected EuRoC path: mav0/state_groundtruth_estimate0/data.csv"
+            )
+        print(f"  GT samples:  {len(gt_samples)}  ({gt_csv})")
+
     if args.output:
         rrd_path = Path(args.output)
     else:
@@ -213,13 +362,20 @@ def main() -> None:
     start_s = rows[0]["timestamp_s"]
 
     n_scalars, n_frames = log_imu_state(
-        rows, start_s, args.frame_stride, args.max_duration_s
+        rows,
+        start_s,
+        frame_stride=args.frame_stride,
+        max_duration_s=args.max_duration_s,
+        axis_length=args.axis_length,
+        gt_samples=gt_samples,
     )
 
     print(f"  Scalar rows logged: {n_scalars}")
     print(f"  Body frames logged: {n_frames}  (stride {args.frame_stride})")
     if args.max_duration_s is not None:
         print(f"  Max duration:       {args.max_duration_s} s")
+    if gt_samples is not None:
+        print(f"  GT mode:            on")
     print(f"  Saved: {rrd_path}")
 
 

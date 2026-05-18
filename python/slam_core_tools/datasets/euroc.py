@@ -7,6 +7,7 @@ Units:
     accel_mps2   — m/s², body frame
 """
 
+import bisect
 import csv
 import math
 import os
@@ -39,10 +40,16 @@ class StereoPair:
 @dataclass(frozen=True)
 class GroundTruthSample:
     timestamp_s: float  # seconds
+    p_x: float          # position in reference frame R (world) [m]
+    p_y: float
+    p_z: float
     q_w: float          # quaternion scalar part (q_RS_w, Hamilton convention)
     q_x: float          # quaternion vector part
     q_y: float
     q_z: float
+    v_x: float          # velocity in reference frame R [m/s]
+    v_y: float
+    v_z: float
 
 
 def load_config(config_path: Path) -> dict:
@@ -148,10 +155,11 @@ def read_groundtruth_csv(path: Path) -> list[GroundTruthSample]:
     """Parse a EuRoC ground-truth CSV into GroundTruthSample records.
 
     Column layout (by index):
-      0: timestamp_ns
-      1-3: position (ignored)
-      4: q_RS_w, 5: q_RS_x, 6: q_RS_y, 7: q_RS_z  (Hamilton convention)
-      8+: velocity, biases (ignored)
+      0:   timestamp_ns
+      1-3: p_RS_R_x/y/z — position in reference frame R [m]
+      4-7: q_RS_w/x/y/z — quaternion, Hamilton convention (w scalar first)
+      8-10: v_RS_R_x/y/z — velocity in reference frame R [m/s]
+      11+: biases (ignored)
 
     Raises:
         FileNotFoundError: if the CSV does not exist.
@@ -164,16 +172,45 @@ def read_groundtruth_csv(path: Path) -> list[GroundTruthSample]:
         next(reader)  # skip header
         for line in reader:
             cols = [x.strip() for x in line]
-            if len(cols) < 8:
+            if len(cols) < 11:
                 continue
             samples.append(GroundTruthSample(
                 timestamp_s=float(cols[0]) * 1e-9,
+                p_x=float(cols[1]),
+                p_y=float(cols[2]),
+                p_z=float(cols[3]),
                 q_w=float(cols[4]),
                 q_x=float(cols[5]),
                 q_y=float(cols[6]),
                 q_z=float(cols[7]),
+                v_x=float(cols[8]),
+                v_y=float(cols[9]),
+                v_z=float(cols[10]),
             ))
     return samples
+
+
+def nearest_gt_sample(
+    ts: float,
+    samples: list[GroundTruthSample],
+) -> GroundTruthSample | None:
+    """Return the GroundTruthSample with the nearest timestamp to ts.
+
+    Uses bisect nearest-neighbor. Clamps to the first or last sample if ts
+    is before the first or after the last timestamp.
+    Returns None for an empty list.
+    """
+    if not samples:
+        return None
+    times = [s.timestamp_s for s in samples]
+    idx = bisect.bisect_left(times, ts)
+    if idx == 0:
+        return samples[0]
+    if idx >= len(samples):
+        return samples[-1]
+    if ts - times[idx - 1] <= times[idx] - ts:
+        return samples[idx - 1]
+    return samples[idx]
 
 
 def associate_stereo_pairs(
