@@ -3,3 +3,6 @@ target_link_libraries(export_gyro_propagation PRIVATE slam_core)
 
 add_executable(export_imu_state_propagation export_imu_state_propagation.cpp)
 target_link_libraries(export_imu_state_propagation PRIVATE slam_core)
+
+add_executable(evaluate_gyro_bias_from_gt evaluate_gyro_bias_from_gt.cpp)
+target_link_libraries(evaluate_gyro_bias_from_gt PRIVATE slam_core)
