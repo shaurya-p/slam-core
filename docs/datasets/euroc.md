@@ -29,6 +29,7 @@ export SLAM_CORE_DATASETS=~/datasets
         cam0/data/   ← image files
         cam1/data.csv
         cam1/data/   ← image files
+        state_groundtruth_estimate0/data.csv
     MH_02_easy/
     V1_01_easy/
     ...
@@ -53,6 +54,20 @@ timestamp [ns], filename
 ```
 
 Images are 752×480 grayscale PNG. Stereo baseline ~11 cm, left/right synchronized.
+
+## Ground-truth CSV format
+
+`mav0/state_groundtruth_estimate0/data.csv`
+
+```
+timestamp [ns],
+p_RS_R_x [m], p_RS_R_y [m], p_RS_R_z [m],
+q_RS_w [], q_RS_x [], q_RS_y [], q_RS_z [],
+v_RS_R_x [m s^-1], v_RS_R_y [m s^-1], v_RS_R_z [m s^-1],
+b_w_RS_S_x [rad s^-1], ...  ← biases (ignored by current loaders)
+```
+
+`q_RS` is the body-to-world quaternion (Hamilton convention, w scalar first). The project reads it directly as `q_W_B`. Timestamps are in nanoseconds; scripts convert to seconds internally. GT coverage typically starts slightly after the IMU CSV — `export_imu_state_propagation --init-from-gt` handles this by skipping IMU rows before GT coverage begins.
 
 ## Rerun channels — debug script
 
@@ -104,6 +119,58 @@ uv run python scripts/rerun_euroc_gyro_propagation.py \
 | `orientation_error/yaw_deg` | deg | ZYX yaw error component |
 
 All orientations and errors are relative to the first estimated/GT pair as reference (both frames coincide at t=0). GT is from `mav0/state_groundtruth_estimate0/data.csv`, matched by nearest-neighbor timestamp lookup. Gyro-only propagation has no gravity alignment, no accelerometer fusion, and no bias correction — drift is expected.
+
+## Rerun channels — IMU state visualization
+
+First export the state CSV from the C++ tool:
+
+```bash
+./build/tools/export_imu_state_propagation \
+  "$HOME/datasets/euroc/MH_01_easy/mav0/imu0/data.csv" \
+  results/imu/MH_01_easy_imu_state.csv \
+  --init-from-gt
+```
+
+`--init-from-gt` initializes position, velocity, and orientation from the nearest GT sample at the first IMU timestamp inside GT coverage. Omit the flag for identity-initialized dead-reckoning.
+
+Then run the visualization:
+
+```bash
+uv run python scripts/rerun_euroc_imu_state_propagation.py \
+  results/imu/MH_01_easy_imu_state.csv \
+  --config configs/datasets/euroc_mh01.yaml \
+  --dataset-root "$HOME/datasets" \
+  --frame-stride 50 --max-duration-s 30 \
+  --output results/rerun/MH_01_easy_imu_state_vs_gt.rrd
+# Output: results/rerun/MH_01_easy_imu_state_vs_gt.rrd
+```
+
+`scripts/rerun_euroc_imu_state_propagation.py` logs the following channels. All 3D spatial entities are shifted so the first estimated position is the world origin; scalar and error plots use raw values.
+
+Always logged:
+
+| Entity path | Unit | Notes |
+|---|---|---|
+| `estimated/trajectory` | — | 3D line strip of estimated positions |
+| `estimated/body_frame` | — | 3D arrows at stride: estimated x-axis (red), y/z (gray) |
+| `imu_state/position_x_m`, `_y_m`, `_z_m` | m | Estimated position components |
+| `imu_state/position_norm_m` | m | Estimated position magnitude |
+| `imu_state/velocity_x_mps`, `_y_mps`, `_z_mps` | m/s | Estimated velocity components |
+| `imu_state/velocity_norm_mps` | m/s | Estimated velocity magnitude |
+
+With `--config` (GT mode):
+
+| Entity path | Unit | Notes |
+|---|---|---|
+| `ground_truth/trajectory` | — | 3D line strip of GT positions |
+| `ground_truth/body_frame` | — | 3D arrows at stride: GT x-axis (blue), y/z (gray) |
+| `ground_truth/velocity_norm_mps` | m/s | GT velocity magnitude |
+| `error/position_x_m`, `_y_m`, `_z_m` | m | Position error components (est − GT) |
+| `error/position_norm_m` | m | Position error magnitude |
+| `error/velocity_norm_mps` | m/s | Velocity error magnitude |
+| `error/orientation_geodesic_deg` | deg | SO(3) geodesic error between estimated and GT rotation |
+
+Drift is expected without bias estimation or gravity alignment.
 
 ## Rerun blueprint workflow
 
