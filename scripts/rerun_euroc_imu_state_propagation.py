@@ -128,11 +128,14 @@ def _set_time(t_s: float, start_s: float) -> None:
 
 
 def _log_axes(entity: str, R: np.ndarray, length: float,
-              x_color: list[int], aux_color: list[int]) -> None:
+              x_color: list[int], aux_color: list[int],
+              position: list[float] | None = None) -> None:
+    if position is None:
+        position = [0.0, 0.0, 0.0]
     rr.log(
         entity,
         rr.Arrows3D(
-            origins=[[0, 0, 0], [0, 0, 0], [0, 0, 0]],
+            origins=[position, position, position],
             vectors=[
                 R[:, 0] * length,
                 R[:, 1] * length * _AUX_SCALE,
@@ -186,6 +189,10 @@ def log_imu_state(
     # Pre-build GT index once to avoid rebuilding per row in the loop.
     gt_times: list[float] = [s.timestamp_s for s in gt_samples] if gt_samples else []
 
+    # Display origin: shift all 3D spatial entities so the first estimated position
+    # is at the world origin. Scalar/error plots use raw values.
+    p0 = np.array([rows[0]["p_x"], rows[0]["p_y"], rows[0]["p_z"]])
+
     est_positions: list[list[float]] = []
     n_scalars = 0
     n_frames  = 0
@@ -202,7 +209,8 @@ def log_imu_state(
             [row["r10"], row["r11"], row["r12"]],
             [row["r20"], row["r21"], row["r22"]],
         ])
-        est_positions.append(p.tolist())
+        p_disp = p - p0
+        est_positions.append(p_disp.tolist())
         _set_time(ts, start_s)
 
         # Estimated scalar plots (always present, including CSV-only mode)
@@ -219,7 +227,7 @@ def log_imu_state(
         # Estimated body-frame axes at stride
         if i % frame_stride == 0:
             _log_axes("estimated/body_frame", R_est, axis_length,
-                      _EST_X_COLOR, _EST_AUX_COLOR)
+                      _EST_X_COLOR, _EST_AUX_COLOR, position=p_disp.tolist())
             n_frames += 1
 
         # GT comparison (only when GT was loaded)
@@ -254,7 +262,8 @@ def log_imu_state(
 
             if i % frame_stride == 0:
                 _log_axes("ground_truth/body_frame", R_gt, axis_length,
-                          _GT_X_COLOR, _GT_AUX_COLOR)
+                          _GT_X_COLOR, _GT_AUX_COLOR,
+                          position=(gt_p - p0).tolist())
 
     # Static trajectory strips (logged after the time-series loop)
     if len(est_positions) >= 2:
@@ -262,7 +271,7 @@ def log_imu_state(
 
     if gt_samples:
         gt_positions = [
-            [s.p_x, s.p_y, s.p_z] for s in gt_samples
+            [s.p_x - p0[0], s.p_y - p0[1], s.p_z - p0[2]] for s in gt_samples
             if max_duration_s is None or s.timestamp_s - start_s <= max_duration_s
         ]
         if len(gt_positions) >= 2:
