@@ -9,9 +9,10 @@
 //               r00..r22 (row-major R_W_B), gyro_bias_x/y/z, accel_bias_x/y/z
 //
 // Propagation:
-//   state[0] is initialized at t[0].
+//   state[0] is initialized at the first IMU timestamp.
 //   Default: identity R, zero p/v/biases.
-//   --init-from-gt: R/p/v from nearest GT sample to t[0]; biases zero.
+//   --init-from-gt: IMU rows before gt_start are skipped; state is initialized
+//     at the first IMU timestamp >= gt_start using the nearest GT sample.
 //   state[i+1] is produced by propagate_imu_state(state[i], meas[i], gravity_W, dt)
 //   where meas[i] is the EuRoC measurement at t[i] and dt = t[i+1] - t[i].
 //   Zeroth-order hold: meas[i] is applied constant over [t[i], t[i+1]].
@@ -31,6 +32,7 @@
 #include <Eigen/Core>
 #include <Eigen/Geometry>
 
+#include "slam_core/geometry/so3.hpp"
 #include "slam_core/imu/imu_measurement.hpp"
 #include "slam_core/imu/imu_state.hpp"
 
@@ -183,6 +185,7 @@ int main(int argc, char* argv[]) {
     // IMU path: <seq_root>/mav0/imu0/data.csv
     // GT path:  <seq_root>/mav0/state_groundtruth_estimate0/data.csv
     std::vector<GtSample> gt_samples;
+    double gt_start = 0.0, gt_end = 0.0;
     if (init_from_gt) {
         namespace fs = std::filesystem;
         const fs::path gt_path =
@@ -193,6 +196,8 @@ int main(int argc, char* argv[]) {
             std::cerr << "Error: GT CSV is empty: " << gt_path << '\n';
             return EXIT_FAILURE;
         }
+        gt_start = gt_samples.front().timestamp_s;
+        gt_end   = gt_samples.back().timestamp_s;
     }
 
     const Eigen::Vector3d gravity_W{0.0, 0.0, -9.81};
@@ -202,6 +207,9 @@ int main(int argc, char* argv[]) {
     bool have_prev = false;
     int written = 0, skipped = 0;
 
+    bool   saw_first_imu   = false;
+    double first_raw_imu_t = 0.0;
+
     while (std::getline(in_file, line)) {
         if (line.empty() || line[0] == '#') continue;
         if (!parse_imu_row(line, curr_meas)) {
@@ -210,7 +218,23 @@ int main(int argc, char* argv[]) {
             continue;
         }
 
+        if (!saw_first_imu) {
+            first_raw_imu_t = curr_meas.timestamp_s;
+            saw_first_imu = true;
+        }
+
+        // Skip IMU rows that predate GT coverage when initializing from GT.
+        if (init_from_gt && !have_prev && curr_meas.timestamp_s < gt_start) continue;
+
         if (!have_prev) {
+            // Fail clearly if the selected IMU start is already past GT end.
+            if (init_from_gt && curr_meas.timestamp_s > gt_end) {
+                std::cerr << "Error: selected IMU start timestamp ("
+                          << curr_meas.timestamp_s << " s) is beyond GT end ("
+                          << gt_end << " s). Cannot initialize from GT.\n";
+                return EXIT_FAILURE;
+            }
+
             // state[0]: initialized at t[0]; timestamp consistent with default behavior.
             state.timestamp_s     = curr_meas.timestamp_s;
             state.gyro_bias_radps = Eigen::Vector3d::Zero();
@@ -233,8 +257,11 @@ int main(int argc, char* argv[]) {
                 state.v_W_B = gt.v;
 
                 std::cerr << "export_imu_state_propagation: --init-from-gt\n"
-                          << "  first IMU t:  " << curr_meas.timestamp_s << " s\n"
-                          << "  matched GT t: " << gt.timestamp_s << " s\n"
+                          << "  first raw IMU t:  " << first_raw_imu_t << " s\n"
+                          << "  GT coverage:      [" << gt_start << ", " << gt_end << "] s\n"
+                          << "  selected IMU t:   " << curr_meas.timestamp_s << " s\n"
+                          << "  matched GT t:     " << gt.timestamp_s << " s\n"
+                          << "  GT-IMU offset:    " << (curr_meas.timestamp_s - gt.timestamp_s) << " s\n"
                           << "  initial p:    ["
                               << gt.p.x() << ", " << gt.p.y() << ", " << gt.p.z() << "] m\n"
                           << "  initial v:    ["
@@ -296,6 +323,17 @@ int main(int argc, char* argv[]) {
         write_row(out_file, state);
         ++written;
         prev_meas = curr_meas;
+    }
+
+    if (init_from_gt && !have_prev) {
+        if (!saw_first_imu) {
+            std::cerr << "Error: IMU CSV has no parseable rows\n";
+        } else {
+            std::cerr << "Error: no IMU sample with timestamp_s >= GT start ("
+                      << gt_start << " s). First IMU timestamp was "
+                      << first_raw_imu_t << " s.\n";
+        }
+        return EXIT_FAILURE;
     }
 
     std::cerr << "export_imu_state_propagation: wrote " << written << " rows";
