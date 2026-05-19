@@ -86,7 +86,8 @@ std::vector<GtSample> read_gt_csv(const std::string& path) {
         std::exit(EXIT_FAILURE);
     }
     std::string line;
-    std::getline(f, line);  // skip header
+    std::getline(f, line);  // read header
+    std::cerr << "  GT CSV header: " << line << '\n';
     std::vector<GtSample> samples;
     int skipped = 0;
     while (std::getline(f, line)) {
@@ -253,6 +254,23 @@ int main(int argc, char* argv[]) {
                           << "  initial v:    [0, 0, 0] m/s\n"
                           << "  initial q:    [w=1, x=0, y=0, z=0]\n";
             }
+
+            // Initial world-frame acceleration: R_W_B * (accel - bias) + gravity_W.
+            // Biases are zero, so corrected_accel_B == curr_meas.accel_mps2.
+            const Eigen::Vector3d corrected_accel_B =
+                curr_meas.accel_mps2 - state.accel_bias_mps2;
+            const Eigen::Vector3d initial_accel_W =
+                state.R_W_B * corrected_accel_B + gravity_W;
+            std::cerr << "  first IMU accel:   ["
+                      << curr_meas.accel_mps2.x() << ", "
+                      << curr_meas.accel_mps2.y() << ", "
+                      << curr_meas.accel_mps2.z() << "] m/s²\n"
+                      << "  gravity_W:         [0, 0, -9.81] m/s²\n"
+                      << "  initial_accel_W:   ["
+                      << initial_accel_W.x() << ", "
+                      << initial_accel_W.y() << ", "
+                      << initial_accel_W.z() << "] m/s²\n"
+                      << "  |initial_accel_W|: " << initial_accel_W.norm() << " m/s²\n";
 
             write_row(out_file, state);
             ++written;
