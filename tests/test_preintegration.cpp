@@ -124,6 +124,45 @@ TEST(Preintegration, BiasEqualsRawMeasurementProducesZeroMotion) {
     EXPECT_TRUE(preint.delta_p.isApprox(Eigen::Vector3d::Zero(), 1e-9));
 }
 
+// --- 7. rotated-frame acceleration ---
+//
+// Validates that body-frame acceleration is rotated by the current delta_R
+// before accumulating into delta_v and delta_p.
+
+TEST(Preintegration, BodyAccelRotatedByDeltaR_YawPlusZ) {
+    // Step 1: 90-deg yaw about +Z, zero accel
+    //   delta_R = R_z(pi/2), delta_v = 0, delta_p = 0
+    // Step 2: zero gyro, accel = [2, 0, 0] (body +X), dt = 0.5 s
+    //   delta_R * [2,0,0] = R_z(pi/2)*[2,0,0] = [0, 2, 0]
+    //   delta_v = [0, 1, 0]   (= [0,2,0] * 0.5)
+    //   delta_p = [0, 0.25, 0] (= 0.5 * [0,2,0] * 0.25)
+    PreintegratedImu preint;
+    const Eigen::Vector3d zero = Eigen::Vector3d::Zero();
+
+    integrate(preint, make_meas(0, 0, M_PI / 2.0), zero, zero, 1.0);
+    integrate(preint, make_meas(0, 0, 0, 2.0, 0, 0), zero, zero, 0.5);
+
+    EXPECT_TRUE(preint.delta_v.isApprox(Eigen::Vector3d(0.0, 1.0, 0.0), 1e-9));
+    EXPECT_TRUE(preint.delta_p.isApprox(Eigen::Vector3d(0.0, 0.25, 0.0), 1e-9));
+}
+
+TEST(Preintegration, BodyAccelRotatedByDeltaR_PitchPlusY) {
+    // Step 1: 90-deg pitch about +Y, zero accel
+    //   delta_R = R_y(pi/2), delta_v = 0, delta_p = 0
+    // Step 2: zero gyro, accel = [0, 0, 3] (body +Z), dt = 0.4 s
+    //   delta_R * [0,0,3] = R_y(pi/2)*[0,0,3] = [3, 0, 0]
+    //   delta_v = [1.2, 0, 0]  (= [3,0,0] * 0.4)
+    //   delta_p = [0.24, 0, 0] (= 0.5 * [3,0,0] * 0.16)
+    PreintegratedImu preint;
+    const Eigen::Vector3d zero = Eigen::Vector3d::Zero();
+
+    integrate(preint, make_meas(0, M_PI / 2.0, 0), zero, zero, 1.0);
+    integrate(preint, make_meas(0, 0, 0, 0, 0, 3.0), zero, zero, 0.4);
+
+    EXPECT_TRUE(preint.delta_v.isApprox(Eigen::Vector3d(1.2, 0.0, 0.0), 1e-9));
+    EXPECT_TRUE(preint.delta_p.isApprox(Eigen::Vector3d(0.24, 0.0, 0.0), 1e-9));
+}
+
 // --- 6. invalid inputs throw ---
 
 TEST(Preintegration, InvalidDtThrows) {
