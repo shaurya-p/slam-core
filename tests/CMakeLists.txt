@@ -20,3 +20,7 @@ gtest_discover_tests(test_gyro_propagation)
 add_executable(test_imu_state test_imu_state.cpp)
 target_link_libraries(test_imu_state PRIVATE GTest::gtest_main slam_core)
 gtest_discover_tests(test_imu_state)
+
+add_executable(test_preintegration test_preintegration.cpp)
+target_link_libraries(test_preintegration PRIVATE GTest::gtest_main slam_core)
+gtest_discover_tests(test_preintegration)

@@ -172,6 +172,105 @@ With `--config` (GT mode):
 
 Drift is expected without bias estimation or gravity alignment.
 
+## Offline bias diagnostics
+
+These tools estimate gyro and accelerometer biases using EuRoC ground truth. They are diagnostic-only — biases are GT-derived and cannot be used by the runtime system.
+
+### Gyro bias evaluation
+
+```bash
+./build/tools/evaluate_gyro_bias_from_gt \
+  "$HOME/datasets/euroc/MH_01_easy/mav0/imu0/data.csv" \
+  "$HOME/datasets/euroc/MH_01_easy/mav0/state_groundtruth_estimate0/data.csv" \
+  results/tmp/MH_01_easy_gyro_bias_1s.csv \
+  --window-duration 1.0
+```
+
+Output CSV columns: `timestamp_start_s`, `timestamp_end_s`, `dt_s`, `integrated_dt_s`, `gyro_bias_est_x_radps`, `gyro_bias_est_y_radps`, `gyro_bias_est_z_radps`, `gyro_bias_est_norm_radps`, `error_angle_deg`
+
+Sign convention: `omega_meas = omega_true + bias`. MH_01_easy result: z-axis dominated, ~0.078 rad/s norm, stable across 1 s and 5 s windows.
+
+### Accel bias evaluation
+
+```bash
+./build/tools/evaluate_accel_bias_from_gt \
+  "$HOME/datasets/euroc/MH_01_easy/mav0/imu0/data.csv" \
+  "$HOME/datasets/euroc/MH_01_easy/mav0/state_groundtruth_estimate0/data.csv" \
+  results/tmp/MH_01_easy_accel_bias_eval_1s.csv \
+  --window-duration 1.0
+```
+
+Output CSV columns: `timestamp_start_s`, `timestamp_end_s`, `integrated_dt_s`, `accel_bias_est_x_mps2`, `accel_bias_est_y_mps2`, `accel_bias_est_z_mps2`, `accel_bias_est_norm_mps2`, `velocity_error_norm_mps`
+
+GT orientation is looked up at each IMU timestamp (no gyro propagation inside the evaluator, so gyro bias does not contaminate the accel estimate). MH_01_easy result: y-axis dominated, ~0.16 m/s² norm, stable across window durations.
+
+### Bias analysis plots
+
+```bash
+# Gyro bias impact: raw vs bias-corrected orientation error
+uv run python scripts/plots/plot_gyro_bias_impact.py \
+  results/imu/MH_01_easy_gyro_orientations.csv \
+  results/imu/MH_01_easy_gyro_orientations_bias_corrected.csv \
+  --config configs/datasets/euroc_mh01.yaml \
+  --dataset-root "$HOME/datasets" \
+  --output results/plots/MH_01_easy_gyro_bias_impact.png
+
+# Accel bias components and velocity error over time
+uv run python scripts/plots/plot_accel_bias_eval.py \
+  results/tmp/MH_01_easy_accel_bias_eval_1s.csv \
+  --output results/plots/MH_01_easy_accel_bias_eval_1s.png
+```
+
+### Offline bias-corrected propagation
+
+Supply GT-derived constant biases to the export tools for offline validation:
+
+```bash
+# Bias-corrected gyro-only orientation export
+./build/tools/export_gyro_propagation \
+  "$HOME/datasets/euroc/MH_01_easy/mav0/imu0/data.csv" \
+  results/imu/MH_01_easy_gyro_orientations_bias_corrected.csv \
+  --gyro-bias -0.00332713 0.0212966 0.0780824
+
+# Full IMU state with both biases supplied
+./build/tools/export_imu_state_propagation \
+  "$HOME/datasets/euroc/MH_01_easy/mav0/imu0/data.csv" \
+  results/imu/MH_01_easy_imu_state_bias_corrected.csv \
+  --init-from-gt \
+  --gyro-bias -0.00332713 0.0212966 0.0780824 \
+  --accel-bias -0.027562 0.137274 0.076698
+```
+
+### Bias comparison visualizations
+
+```bash
+# Raw vs bias-corrected gyro orientation — two 3D panels
+uv run python scripts/rerun/rerun_euroc_gyro_bias_comparison.py \
+  configs/datasets/euroc_mh01.yaml \
+  results/imu/MH_01_easy_gyro_orientations.csv \
+  results/imu/MH_01_easy_gyro_orientations_bias_corrected.csv \
+  --dataset-root "$HOME/datasets" \
+  --output results/rerun/MH_01_easy_gyro_bias_comparison.rrd
+
+# Raw vs bias-corrected IMU state — scalar error dashboard
+uv run python scripts/rerun/rerun_euroc_imu_state_bias_comparison.py \
+  results/imu/MH_01_easy_imu_state.csv \
+  results/imu/MH_01_easy_imu_state_bias_corrected.csv \
+  --config configs/datasets/euroc_mh01.yaml \
+  --dataset-root "$HOME/datasets" \
+  --max-duration-s 180 \
+  --output results/rerun/MH_01_easy_imu_state_bias_comparison.rrd
+```
+
+MH_01_easy key results over ~180 s:
+
+| Metric | Raw | Bias-corrected |
+|---|---|---|
+| Mean gyro-only orientation error | ~108° | ~7° |
+| Position error at ~60 s (GT-init) | ~50,000 m | ~400 m |
+
+Bias correction dramatically reduces drift. Pure inertial dead-reckoning still fails for trajectory — visual constraints are necessary.
+
 ## Rerun blueprint workflow
 
 Rerun separates **data** from **layout**:

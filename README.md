@@ -10,14 +10,14 @@ A geometry-first Visual-Inertial SLAM project. The goal is a clean, testable imp
 - Bias-corrected gyro propagation
 - Full `ImuState` (position, velocity, orientation, gyro/accel biases) with single-step propagation using gyro, accelerometer, and gravity
 - EuRoC dataset loading utilities (IMU, camera, stereo pairs, ground truth with position/velocity/quaternion)
-- C++ export tools for orientation CSVs and full IMU state CSVs; `--init-from-gt` initializes state from GT at the start of GT coverage
-- Rerun debug visualization: stereo images, raw IMU, derived IMU channels
-- Rerun gyro propagation visualization: estimated vs GT 3D orientation axes, SO(3) geodesic error, RPY error components
-- Rerun IMU state visualization: estimated and GT 3D trajectories and body frames, position/velocity scalar plots, position/velocity/orientation error vs GT
+- C++ export tools for orientation and full IMU state CSVs; `--init-from-gt` initializes from GT; `--gyro-bias` / `--accel-bias` supply offline-validated constant biases
+- Offline GT-based bias diagnostics: `evaluate_gyro_bias_from_gt`, `evaluate_accel_bias_from_gt` estimate per-window gyro and accel bias from GT; MH_01_easy results show ~0.078 rad/s gyro bias (z-dominated) and ~0.16 m/s² accel bias norm
+- Offline bias-corrected validation: supplying GT-derived biases reduces gyro-only mean orientation error from ~108° to ~7° over 180 s, and full IMU dead-reckoning position error from ~50 km to ~400 m at 60 s — demonstrating that pure inertial navigation still requires visual constraints
+- Visualization: Rerun scripts for debug, gyro propagation, gyro/accel bias comparison, and IMU state error dashboard; Matplotlib scripts for scalar bias analysis; organized under `scripts/rerun/` and `scripts/plots/`
 
 ## Future work
 
-Gyro bias evaluation from GT, accel bias and gravity consistency evaluation, gravity-aligned initialization without GT, IMU preintegration, camera projection/reprojection, visual odometry, visual-inertial factor graph, loop closure.
+IMU preintegration, gravity-aligned initialization without GT, camera projection/reprojection, visual odometry, visual-inertial factor graph, loop closure.
 
 ## Docs
 

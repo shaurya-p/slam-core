@@ -4,6 +4,7 @@ add_library(slam_core STATIC
     imu/imu_measurement.cpp
     imu/gyro_propagation.cpp
     imu/imu_state.cpp
+    imu/preintegration.cpp
 )
 
 target_include_directories(slam_core PUBLIC ${PROJECT_SOURCE_DIR}/include)

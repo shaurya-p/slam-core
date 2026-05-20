@@ -24,14 +24,21 @@
 
 ### Tools (`tools/`)
 
-- `export_gyro_propagation` — reads EuRoC IMU CSV, integrates orientation, writes row-major `R_W_B` CSV
-- `export_imu_state_propagation` — reads EuRoC IMU CSV, propagates full `ImuState`, writes state CSV; `--init-from-gt` initializes position/velocity/orientation from GT at the first IMU timestamp inside GT coverage
+- `export_gyro_propagation` — reads EuRoC IMU CSV, integrates orientation, writes row-major `R_W_B` CSV; `--gyro-bias bx by bz` applies offline bias correction (offline validation only)
+- `export_imu_state_propagation` — reads EuRoC IMU CSV, propagates full `ImuState`, writes state CSV; `--init-from-gt` initializes position/velocity/orientation from GT; `--gyro-bias` / `--accel-bias` supply offline-validated constant biases (offline validation only)
+- `evaluate_gyro_bias_from_gt` — estimates gyro bias per non-overlapping window by comparing raw gyro integration against GT relative rotation; sign convention: `omega_meas = omega_true + bias`
+- `evaluate_accel_bias_from_gt` — estimates accel bias per window using GT velocity change and GT orientation at each IMU timestamp; `--gravity-z` sets the world-frame gravity value (default −9.81 m/s²)
 
 ### Visualization (`scripts/`)
 
-- `rerun_euroc_debug.py` — stereo images, raw IMU, derived IMU channels
-- `rerun_euroc_gyro_propagation.py` — estimated vs GT 3D orientation arrows, geodesic error, RPY error components
-- `rerun_euroc_imu_state_propagation.py` — estimated and GT 3D trajectories and body frames, position/velocity scalar plots, position/velocity/orientation error vs GT
+Scripts are organized into two subdirectories:
+
+- `scripts/rerun/` — Rerun recordings for spatial visualization and error dashboards
+- `scripts/plots/` — Matplotlib PNG outputs for scalar analysis
+
+Rerun scripts: `rerun_euroc_debug.py` (stereo + raw IMU), `rerun_euroc_gyro_propagation.py` (gyro-only orientation vs GT), `rerun_euroc_gyro_bias_comparison.py` (raw vs bias-corrected gyro orientation, two 3D panels), `rerun_euroc_gyro_bias_eval.py` (per-window gyro bias scalar channels), `rerun_euroc_imu_state_propagation.py` (full IMU state trajectories and error vs GT), `rerun_euroc_imu_state_bias_comparison.py` (raw vs bias-corrected IMU state error dashboard).
+
+Matplotlib scripts: `plot_gyro_bias_impact.py` (raw vs bias-corrected orientation drift), `plot_accel_bias_eval.py` (accel bias components and velocity error over time).
 
 ## Key conventions
 
@@ -44,12 +51,12 @@
 
 ## Planned direction
 
-The IMU propagation foundation is complete. The next focus is bias characterization and initialization before preintegration:
+IMU propagation and offline bias diagnostics are complete. The next focus is preintegration and visual constraints:
 
-1. Gyro bias evaluation from GT — quantify orientation drift contribution
-2. Accel bias / gravity consistency evaluation — measure residual world-frame acceleration over static segments
-3. Gravity-aligned initialization without GT — accelerometer-based world-frame alignment
-4. IMU preintegration — between-keyframe preintegrated measurements for use as IMU factors
-5. Visual-inertial factor graph — reprojection factors + IMU factors (requires 1–4)
+1. IMU preintegration — preintegrate IMU measurements between keyframe timestamps for use as IMU factors
+2. Gravity-aligned initialization without GT — accelerometer-based world-frame alignment
+3. Camera models — projection, distortion, reprojection error
+4. Feature detection and tracking
+5. Visual-inertial factor graph — reprojection + IMU preintegration factors
 
-Feature detection and tracking, fixed-lag VIO backend, GTSAM/iSAM2 pose graph, loop closure, and ROS2 integration are not yet started.
+Fixed-lag VIO backend, GTSAM/iSAM2 pose graph, loop closure, and ROS2 integration are not yet started.
