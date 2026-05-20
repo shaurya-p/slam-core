@@ -1,12 +1,13 @@
 """
 Compare raw vs bias-corrected gyro-only propagation against EuRoC GT in Rerun.
 
-Logs three orientation frames into the same 3D scene:
-  ground_truth/body_frame     — blue  x-axis
-  raw_gyro/body_frame         — red   x-axis
-  bias_corrected/body_frame   — green x-axis
+Two separate 3D views, one error plot:
+  raw_comparison/ground_truth/body_frame    — blue  x-axis  (Raw Gyro vs GT panel)
+  raw_comparison/raw_gyro/body_frame        — red   x-axis
+  corrected_comparison/ground_truth/body_frame  — blue  x-axis  (Bias-Corrected vs GT panel)
+  corrected_comparison/bias_corrected/body_frame — green x-axis
 
-Also logs scalar error channels:
+Scalar error channels:
   orientation_error/raw_geodesic_deg
   orientation_error/bias_corrected_geodesic_deg
 
@@ -34,6 +35,7 @@ from pathlib import Path
 
 import numpy as np
 import rerun as rr
+import rerun.blueprint as rrb
 
 from slam_core_tools.datasets.euroc import (
     GroundTruthSample,
@@ -227,8 +229,19 @@ def main() -> None:
         rrd_path = Path("results/rerun") / f"{sequence}_gyro_bias_comparison.rrd"
     rrd_path.parent.mkdir(parents=True, exist_ok=True)
 
+    blueprint = rrb.Blueprint(
+        rrb.Vertical(
+            rrb.Horizontal(
+                rrb.Spatial3DView(name="Raw Gyro vs GT",       origin="raw_comparison"),
+                rrb.Spatial3DView(name="Bias-Corrected vs GT", origin="corrected_comparison"),
+            ),
+            rrb.TimeSeriesView(name="Orientation Error", origin="orientation_error"),
+            row_shares=[3, 2],
+        ),
+    )
+
     rr.init(f"slam_core/{sequence}/gyro_bias_comparison", spawn=False)
-    rr.save(str(rrd_path))
+    rr.save(str(rrd_path), default_blueprint=blueprint)
 
     # Reference pair: first raw row matched to nearest GT.
     # Both series use this pair so their relative errors are comparable.
@@ -266,9 +279,10 @@ def main() -> None:
         rr.log("orientation_error/bias_corrected_geodesic_deg", rr.Scalars(err_corr))
 
         if i % args.frame_stride == 0:
-            _log_frame("ground_truth/body_frame",   R_gt_rel,  _GT_X_COLOR,  _GT_AUX_COLOR)
-            _log_frame("raw_gyro/body_frame",        R_raw_rel, _RAW_X_COLOR, _RAW_AUX_COLOR)
-            _log_frame("bias_corrected/body_frame",  R_cor_rel, _COR_X_COLOR, _COR_AUX_COLOR)
+            _log_frame("raw_comparison/ground_truth/body_frame",        R_gt_rel,  _GT_X_COLOR,  _GT_AUX_COLOR)
+            _log_frame("raw_comparison/raw_gyro/body_frame",            R_raw_rel, _RAW_X_COLOR, _RAW_AUX_COLOR)
+            _log_frame("corrected_comparison/ground_truth/body_frame",  R_gt_rel,  _GT_X_COLOR,  _GT_AUX_COLOR)
+            _log_frame("corrected_comparison/bias_corrected/body_frame", R_cor_rel, _COR_X_COLOR, _COR_AUX_COLOR)
             n_logged += 1
 
     if not raw_errors:
