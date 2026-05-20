@@ -7,7 +7,7 @@ Three subplots:
   3. Velocity error norm over time
 
 Usage:
-    uv run python scripts/plot_accel_bias_eval.py \\
+    uv run python scripts/plots/plot_accel_bias_eval.py \\
       results/tmp/MH_01_easy_accel_bias_eval_1s.csv \\
       --output results/plots/MH_01_easy_accel_bias_eval_1s.png \\
       --max-duration-s 180

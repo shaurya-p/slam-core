@@ -19,11 +19,11 @@ CSV columns:
 Propagation is NOT recomputed here.
 
 Usage (CSV-only):
-    uv run python scripts/rerun_euroc_imu_state_propagation.py \\
+    uv run python scripts/rerun/rerun_euroc_imu_state_propagation.py \\
       results/imu/MH_01_easy_imu_state.csv
 
 Usage (with GT comparison):
-    uv run python scripts/rerun_euroc_imu_state_propagation.py \\
+    uv run python scripts/rerun/rerun_euroc_imu_state_propagation.py \\
       results/imu/MH_01_easy_imu_state.csv \\
       --config configs/datasets/euroc_mh01.yaml \\
       --dataset-root "$HOME/datasets" \\

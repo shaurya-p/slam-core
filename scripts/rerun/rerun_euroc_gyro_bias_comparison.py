@@ -13,10 +13,10 @@ Scalar error channels:
 
 Both estimated series share the same reference pair (first raw row) for
 relative-orientation comparison — identical convention to
-scripts/rerun_euroc_gyro_propagation.py.
+scripts/rerun/rerun_euroc_gyro_propagation.py.
 
 Usage:
-    uv run python scripts/rerun_euroc_gyro_bias_comparison.py \\
+    uv run python scripts/rerun/rerun_euroc_gyro_bias_comparison.py \\
       configs/datasets/euroc_mh01.yaml \\
       results/imu/MH_01_easy_gyro_orientations.csv \\
       results/imu/MH_01_easy_gyro_orientations_bias_corrected.csv \\

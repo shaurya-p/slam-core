@@ -2,7 +2,7 @@
 EuRoC debug logger. Reads one sequence and logs stereo images + IMU to Rerun.
 
 Usage:
-    uv run python scripts/rerun_euroc_debug.py [config_yaml] [--dataset-root PATH]
+    uv run python scripts/rerun/rerun_euroc_debug.py [config_yaml] [--dataset-root PATH]
                                                [--max-frames N] [--image-stride N]
                                                [--imu-stride N] [--full]
 

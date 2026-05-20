@@ -17,7 +17,7 @@ Roll/pitch/yaw are ZYX Euler angles derived from the exported matrix entries.
 SO(3) propagation is NOT recomputed here.
 
 Usage:
-    uv run python scripts/rerun_euroc_gyro_propagation.py \\
+    uv run python scripts/rerun/rerun_euroc_gyro_propagation.py \\
       configs/datasets/euroc_mh01.yaml \\
       results/imu/MH_01_easy_gyro_orientations.csv \\
       --dataset-root "$HOME/datasets" \\

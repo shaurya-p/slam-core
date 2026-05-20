@@ -71,7 +71,7 @@ b_w_RS_S_x [rad s^-1], ...  ← biases (ignored by current loaders)
 
 ## Rerun channels — debug script
 
-`scripts/rerun_euroc_debug.py` logs the following channels (timeline: `time`, sequence-relative seconds):
+`scripts/rerun/rerun_euroc_debug.py` logs the following channels (timeline: `time`, sequence-relative seconds):
 
 | Entity path | Unit | Notes |
 |---|---|---|
@@ -99,7 +99,7 @@ First export the orientation CSV from the C++ tool:
 Then run the visualization:
 
 ```bash
-uv run python scripts/rerun_euroc_gyro_propagation.py \
+uv run python scripts/rerun/rerun_euroc_gyro_propagation.py \
   configs/datasets/euroc_mh01.yaml \
   results/imu/MH_01_easy_gyro_orientations.csv \
   --dataset-root "$HOME/datasets" \
@@ -107,7 +107,7 @@ uv run python scripts/rerun_euroc_gyro_propagation.py \
 # Output: results/rerun/MH_01_easy_gyro_propagation.rrd
 ```
 
-`scripts/rerun_euroc_gyro_propagation.py` logs the following channels:
+`scripts/rerun/rerun_euroc_gyro_propagation.py` logs the following channels:
 
 | Entity path | Unit | Notes |
 |---|---|---|
@@ -136,7 +136,7 @@ First export the state CSV from the C++ tool:
 Then run the visualization:
 
 ```bash
-uv run python scripts/rerun_euroc_imu_state_propagation.py \
+uv run python scripts/rerun/rerun_euroc_imu_state_propagation.py \
   results/imu/MH_01_easy_imu_state.csv \
   --config configs/datasets/euroc_mh01.yaml \
   --dataset-root "$HOME/datasets" \
@@ -145,7 +145,7 @@ uv run python scripts/rerun_euroc_imu_state_propagation.py \
 # Output: results/rerun/MH_01_easy_imu_state_vs_gt.rrd
 ```
 
-`scripts/rerun_euroc_imu_state_propagation.py` logs the following channels. All 3D spatial entities are shifted so the first estimated position is the world origin; scalar and error plots use raw values.
+`scripts/rerun/rerun_euroc_imu_state_propagation.py` logs the following channels. All 3D spatial entities are shifted so the first estimated position is the world origin; scalar and error plots use raw values.
 
 Always logged:
 
@@ -184,7 +184,7 @@ Committing the `.rbl` makes the dashboard reproducible across recordings and mac
 ### Step 1 — generate a debug recording
 
 ```bash
-uv run python scripts/rerun_euroc_debug.py configs/datasets/euroc_mh01.yaml \
+uv run python scripts/rerun/rerun_euroc_debug.py configs/datasets/euroc_mh01.yaml \
   --dataset-root "$HOME/datasets" \
   --max-frames 300 --image-stride 2 --imu-stride 2
 # Output: results/rerun/MH_01_easy_debug.rrd
@@ -243,8 +243,8 @@ Pass the config path to scripts:
 ```bash
 # Using env var (recommended)
 export SLAM_CORE_DATASETS=~/datasets
-uv run python scripts/rerun_euroc_debug.py configs/datasets/euroc_mh01.yaml
+uv run python scripts/rerun/rerun_euroc_debug.py configs/datasets/euroc_mh01.yaml
 
 # Using CLI arg (overrides env var)
-uv run python scripts/rerun_euroc_debug.py configs/datasets/euroc_mh01.yaml --dataset-root ~/datasets
+uv run python scripts/rerun/rerun_euroc_debug.py configs/datasets/euroc_mh01.yaml --dataset-root ~/datasets
 ```

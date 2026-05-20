@@ -15,7 +15,7 @@ Sign convention (from evaluate_gyro_bias_from_gt):
   omega_meas = omega_true + bias
 
 Usage:
-    uv run python scripts/rerun_euroc_gyro_bias_eval.py \\
+    uv run python scripts/rerun/rerun_euroc_gyro_bias_eval.py \\
       results/tmp/MH_01_easy_gyro_bias_1s.csv \\
       --output results/rerun/MH_01_easy_gyro_bias_1s.rrd
 """

@@ -3,7 +3,7 @@ Plot gyro bias correction impact on orientation drift.
 
 Compares raw vs bias-corrected gyro-only propagation against EuRoC GT.
 
-Error convention — identical to scripts/rerun_euroc_gyro_propagation.py:
+Error convention — identical to scripts/rerun/rerun_euroc_gyro_propagation.py:
   R_est_ref = estimated rotation at t0 (first raw CSV row)
   R_gt_ref  = nearest GT rotation at t0
 
@@ -15,7 +15,7 @@ Error convention — identical to scripts/rerun_euroc_gyro_propagation.py:
 Both series share the same reference pair (first timestamp of the raw CSV).
 
 Usage:
-    uv run python scripts/plot_gyro_bias_impact.py \\
+    uv run python scripts/plots/plot_gyro_bias_impact.py \\
       results/imu/MH_01_easy_gyro_orientations.csv \\
       results/imu/MH_01_easy_gyro_orientations_bias_corrected.csv \\
       --config configs/datasets/euroc_mh01.yaml \\
