@@ -1,6 +1,8 @@
 // Export gyro-only SO(3) orientation propagation results to CSV.
 //
-// Usage: export_gyro_propagation <euroc_imu_csv_path> <output_csv_path>
+// Usage:
+//   export_gyro_propagation <euroc_imu_csv_path> <output_csv_path>
+//   export_gyro_propagation <euroc_imu_csv_path> <output_csv_path> --gyro-bias bx by bz
 //
 // Input:  EuRoC IMU CSV — columns: timestamp_ns, wx, wy, wz, ax, ay, az
 //                         Gyro is columns 1,2,3 (wx, wy, wz) immediately after timestamp.
@@ -8,8 +10,14 @@
 // Output: CSV — timestamp_s, r00..r22 (row-major R_W_B entries)
 //               R_W_B maps body frame B into world frame W.
 //               Initialized to identity at t0.
-//               Propagation: R_W_B_next = R_W_B * exp_so3(gyro_radps * dt_s)
+//               Default: R_W_B_next = R_W_B * exp_so3(gyro_radps * dt_s)
+//               With --gyro-bias: applies propagate_gyro_biascorrected using user-provided bias.
 //               Zeroth-order hold: gyro at t_i is applied over [t_i, t_{i+1}].
+//
+// --gyro-bias bx by bz:
+//   Offline validation only. User-supplied constant body-frame gyro bias [rad/s].
+//   Convention: omega_meas = omega_true + bias; correction = omega_meas - bias.
+//   This does not represent a runtime estimator or GT-derived capability.
 
 #include <cmath>
 #include <cstdlib>
@@ -63,10 +71,31 @@ void write_row(std::ofstream& out, double timestamp_s,
 }  // namespace
 
 int main(int argc, char* argv[]) {
-    if (argc != 3) {
-        std::cerr << "Usage: " << argv[0]
-                  << " <euroc_imu_csv_path> <output_csv_path>\n";
+    const char* usage =
+        "Usage: export_gyro_propagation"
+        " <euroc_imu_csv_path> <output_csv_path>"
+        " [--gyro-bias bx by bz]\n";
+
+    if (argc != 3 && argc != 7) {
+        std::cerr << usage;
         return EXIT_FAILURE;
+    }
+
+    bool             use_bias_correction = false;
+    Eigen::Vector3d  gyro_bias           = Eigen::Vector3d::Zero();
+
+    if (argc == 7) {
+        if (std::string(argv[3]) != "--gyro-bias") {
+            std::cerr << "Error: unknown argument: " << argv[3] << '\n' << usage;
+            return EXIT_FAILURE;
+        }
+        try {
+            gyro_bias = {std::stod(argv[4]), std::stod(argv[5]), std::stod(argv[6])};
+        } catch (...) {
+            std::cerr << "Error: --gyro-bias requires three numeric values\n";
+            return EXIT_FAILURE;
+        }
+        use_bias_correction = true;
     }
 
     std::ifstream in_file(argv[1]);
@@ -82,6 +111,16 @@ int main(int argc, char* argv[]) {
     }
     out_file << std::setprecision(12) << std::fixed;
     out_file << "timestamp_s,r00,r01,r02,r10,r11,r12,r20,r21,r22\n";
+
+    if (use_bias_correction) {
+        std::cerr << "export_gyro_propagation: bias correction enabled"
+                     " (user-provided constant bias, offline validation only)\n"
+                  << "  gyro_bias_radps: ["
+                  << gyro_bias.x() << ", " << gyro_bias.y() << ", " << gyro_bias.z() << "]\n"
+                  << "  omega_corrected = omega_meas - gyro_bias\n";
+    } else {
+        std::cerr << "export_gyro_propagation: bias correction disabled (raw gyro)\n";
+    }
 
     // Skip EuRoC CSV header line
     std::string line;
@@ -125,7 +164,12 @@ int main(int argc, char* argv[]) {
         }
 
         // Zeroth-order hold: apply prev.gyro over [prev.timestamp_s, curr.timestamp_s].
-        R_W_B = slam_core::imu::propagate_gyro(R_W_B, prev.gyro_radps, dt_s);
+        if (use_bias_correction) {
+            R_W_B = slam_core::imu::propagate_gyro_bias_corrected(
+                R_W_B, prev.gyro_radps, gyro_bias, dt_s);
+        } else {
+            R_W_B = slam_core::imu::propagate_gyro(R_W_B, prev.gyro_radps, dt_s);
+        }
         write_row(out_file, curr.timestamp_s, R_W_B);
         ++written;
         prev = curr;
