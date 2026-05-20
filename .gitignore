@@ -27,8 +27,8 @@ CMakeFiles/
 # Datasets — too large for git
 data/
 
-# Docs - for internal use
-docs/project_state.md
+# # Docs - for internal use
+# docs/project_state.md
 
 # Logs and outputs
 *.log
