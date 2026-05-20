@@ -1,7 +1,10 @@
 // Export full IMU state propagation results to CSV.
 //
 // Usage:
-//   export_imu_state_propagation <euroc_imu_csv_path> <output_csv_path> [--init-from-gt]
+//   export_imu_state_propagation <euroc_imu_csv_path> <output_csv_path>
+//                                [--init-from-gt]
+//                                [--gyro-bias bx by bz]
+//                                [--accel-bias bx by bz]
 //
 // Input:  EuRoC IMU CSV — columns: timestamp_ns, wx, wy, wz, ax, ay, az
 //
@@ -17,7 +20,10 @@
 //   where meas[i] is the EuRoC measurement at t[i] and dt = t[i+1] - t[i].
 //   Zeroth-order hold: meas[i] is applied constant over [t[i], t[i+1]].
 //   Written timestamp matches state[i+1].timestamp_s = t[i+1].
-//   gravity_W = [0, 0, -9.81] m/s^2. Biases are zero throughout.
+//   gravity_W = [0, 0, -9.81] m/s^2.
+//   Biases default to zero; supply --gyro-bias / --accel-bias for offline validation.
+//   Convention: omega_corrected = omega_meas - gyro_bias;
+//               accel_corrected = accel_meas - accel_bias.
 
 #include <cmath>
 #include <cstdlib>
@@ -148,16 +154,42 @@ void write_row(std::ofstream& out,
 int main(int argc, char* argv[]) {
     const char* usage =
         "Usage: export_imu_state_propagation"
-        " <euroc_imu_csv_path> <output_csv_path> [--init-from-gt]\n";
+        " <euroc_imu_csv_path> <output_csv_path>"
+        " [--init-from-gt]"
+        " [--gyro-bias bx by bz]"
+        " [--accel-bias bx by bz]\n";
 
-    if (argc < 3 || argc > 4) { std::cerr << usage; return EXIT_FAILURE; }
-    bool init_from_gt = false;
-    if (argc == 4) {
-        if (std::string(argv[3]) != "--init-from-gt") {
-            std::cerr << "Error: unknown argument: " << argv[3] << '\n' << usage;
+    if (argc < 3) { std::cerr << usage; return EXIT_FAILURE; }
+
+    bool            init_from_gt      = false;
+    bool            use_gyro_bias     = false;
+    bool            use_accel_bias    = false;
+    Eigen::Vector3d gyro_bias_radps   = Eigen::Vector3d::Zero();
+    Eigen::Vector3d accel_bias_mps2   = Eigen::Vector3d::Zero();
+
+    for (int i = 3; i < argc; ++i) {
+        const std::string arg(argv[i]);
+        if (arg == "--init-from-gt") {
+            init_from_gt = true;
+        } else if (arg == "--gyro-bias" || arg == "--accel-bias") {
+            if (i + 3 >= argc) {
+                std::cerr << "Error: " << arg << " requires three values\n";
+                return EXIT_FAILURE;
+            }
+            Eigen::Vector3d vec;
+            try {
+                vec = {std::stod(argv[i+1]), std::stod(argv[i+2]), std::stod(argv[i+3])};
+            } catch (...) {
+                std::cerr << "Error: " << arg << " values must be numeric\n";
+                return EXIT_FAILURE;
+            }
+            if (arg == "--gyro-bias")  { gyro_bias_radps = vec; use_gyro_bias  = true; }
+            else                       { accel_bias_mps2 = vec; use_accel_bias = true; }
+            i += 3;
+        } else {
+            std::cerr << "Error: unknown argument: " << arg << '\n' << usage;
             return EXIT_FAILURE;
         }
-        init_from_gt = true;
     }
 
     std::ifstream in_file(argv[1]);
@@ -237,8 +269,8 @@ int main(int argc, char* argv[]) {
 
             // state[0]: initialized at t[0]; timestamp consistent with default behavior.
             state.timestamp_s     = curr_meas.timestamp_s;
-            state.gyro_bias_radps = Eigen::Vector3d::Zero();
-            state.accel_bias_mps2 = Eigen::Vector3d::Zero();
+            state.gyro_bias_radps = use_gyro_bias  ? gyro_bias_radps : Eigen::Vector3d::Zero();
+            state.accel_bias_mps2 = use_accel_bias ? accel_bias_mps2 : Eigen::Vector3d::Zero();
 
             if (init_from_gt) {
                 const GtSample& gt = nearest_gt(curr_meas.timestamp_s, gt_samples);
@@ -269,7 +301,17 @@ int main(int argc, char* argv[]) {
                           << "  initial q:    [w=" << gt.q_w/q_norm
                               << ", x=" << gt.q_x/q_norm
                               << ", y=" << gt.q_y/q_norm
-                              << ", z=" << gt.q_z/q_norm << "]\n";
+                              << ", z=" << gt.q_z/q_norm << "]\n"
+                          << "  gyro bias:    "
+                              << (use_gyro_bias ? "enabled" : "disabled")
+                              << "  [" << state.gyro_bias_radps.x()
+                              << ", " << state.gyro_bias_radps.y()
+                              << ", " << state.gyro_bias_radps.z() << "] rad/s\n"
+                          << "  accel bias:   "
+                              << (use_accel_bias ? "enabled" : "disabled")
+                              << "  [" << state.accel_bias_mps2.x()
+                              << ", " << state.accel_bias_mps2.y()
+                              << ", " << state.accel_bias_mps2.z() << "] m/s²\n";
             } else {
                 state.R_W_B = Eigen::Matrix3d::Identity();
                 state.p_W_B = Eigen::Vector3d::Zero();
@@ -279,7 +321,17 @@ int main(int argc, char* argv[]) {
                           << "  first IMU t:  " << curr_meas.timestamp_s << " s\n"
                           << "  initial p:    [0, 0, 0] m\n"
                           << "  initial v:    [0, 0, 0] m/s\n"
-                          << "  initial q:    [w=1, x=0, y=0, z=0]\n";
+                          << "  initial q:    [w=1, x=0, y=0, z=0]\n"
+                          << "  gyro bias:    "
+                              << (use_gyro_bias ? "enabled" : "disabled")
+                              << "  [" << state.gyro_bias_radps.x()
+                              << ", " << state.gyro_bias_radps.y()
+                              << ", " << state.gyro_bias_radps.z() << "] rad/s\n"
+                          << "  accel bias:   "
+                              << (use_accel_bias ? "enabled" : "disabled")
+                              << "  [" << state.accel_bias_mps2.x()
+                              << ", " << state.accel_bias_mps2.y()
+                              << ", " << state.accel_bias_mps2.z() << "] m/s²\n";
             }
 
             // Initial world-frame acceleration: R_W_B * (accel - bias) + gravity_W.
