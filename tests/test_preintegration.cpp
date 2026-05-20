@@ -12,6 +12,7 @@ using slam_core::imu::PreintegratedImu;
 using slam_core::imu::ImuMeasurement;
 using slam_core::imu::integrate;
 using slam_core::imu::integrate_sequence;
+using slam_core::imu::integrate_window;
 using slam_core::geometry::exp_so3;
 
 // --- helpers ---
@@ -347,4 +348,181 @@ TEST(IntegrateSequence, MatchesManualStepwiseNonUniformDt) {
     EXPECT_TRUE(result.delta_v.isApprox(manual.delta_v, 1e-12));
     EXPECT_TRUE(result.delta_p.isApprox(manual.delta_p, 1e-12));
     EXPECT_NEAR(result.delta_t_s, manual.delta_t_s, 1e-12);
+}
+
+// =============================================================================
+// integrate_window tests
+// =============================================================================
+
+// Builds a uniform 5-measurement stream at t = 0.0, 0.1, 0.2, 0.3, 0.4.
+static std::vector<ImuMeasurement> make_stream_5()
+{
+    std::vector<ImuMeasurement> s;
+    for (int i = 0; i < 5; ++i) {
+        s.push_back(make_timed_meas(i * 0.1, 0.1, 0.0, -0.05, 0.5, -0.3, 0.2));
+    }
+    return s;
+}
+
+// --- invalid window arguments ---
+
+TEST(IntegrateWindow, InvalidWindowTimestampsThrow) {
+    const Eigen::Vector3d zero = Eigen::Vector3d::Zero();
+    const auto stream = make_stream_5();
+    constexpr double kNaN = std::numeric_limits<double>::quiet_NaN();
+    constexpr double kInf = std::numeric_limits<double>::infinity();
+
+    EXPECT_THROW(integrate_window(stream, kNaN,  0.3,  zero, zero), std::invalid_argument);
+    EXPECT_THROW(integrate_window(stream, 0.0,   kNaN, zero, zero), std::invalid_argument);
+    EXPECT_THROW(integrate_window(stream, kInf,  0.3,  zero, zero), std::invalid_argument);
+    EXPECT_THROW(integrate_window(stream, 0.0,   kInf, zero, zero), std::invalid_argument);
+    EXPECT_THROW(integrate_window(stream, 0.2,   0.2,  zero, zero), std::invalid_argument);
+    EXPECT_THROW(integrate_window(stream, 0.3,   0.1,  zero, zero), std::invalid_argument);
+}
+
+TEST(IntegrateWindow, NonFiniteBiasThrows) {
+    const Eigen::Vector3d zero = Eigen::Vector3d::Zero();
+    const auto stream = make_stream_5();
+    constexpr double kNaN = std::numeric_limits<double>::quiet_NaN();
+
+    EXPECT_THROW(
+        integrate_window(stream, 0.0, 0.4, Eigen::Vector3d{kNaN, 0.0, 0.0}, zero),
+        std::invalid_argument);
+    EXPECT_THROW(
+        integrate_window(stream, 0.0, 0.4, zero, Eigen::Vector3d{0.0, kNaN, 0.0}),
+        std::invalid_argument);
+}
+
+// --- invalid stream ---
+
+TEST(IntegrateWindow, EmptyStreamThrows) {
+    const Eigen::Vector3d zero = Eigen::Vector3d::Zero();
+    EXPECT_THROW(
+        integrate_window({}, 0.0, 0.4, zero, zero),
+        std::invalid_argument);
+}
+
+TEST(IntegrateWindow, StreamNonIncreasingTimestampsThrow) {
+    const Eigen::Vector3d zero = Eigen::Vector3d::Zero();
+
+    // Duplicate timestamp
+    std::vector<ImuMeasurement> dup = {
+        make_timed_meas(0.0), make_timed_meas(0.1), make_timed_meas(0.1), make_timed_meas(0.2)
+    };
+    EXPECT_THROW(integrate_window(dup, 0.0, 0.2, zero, zero), std::invalid_argument);
+
+    // Decreasing timestamp
+    std::vector<ImuMeasurement> dec = {
+        make_timed_meas(0.0), make_timed_meas(0.2), make_timed_meas(0.1), make_timed_meas(0.3)
+    };
+    EXPECT_THROW(integrate_window(dec, 0.0, 0.3, zero, zero), std::invalid_argument);
+}
+
+// Non-finite measurement outside the requested window: full stream is validated,
+// not just the selected window.
+TEST(IntegrateWindow, NonFiniteMeasurementOutsideWindowThrows) {
+    const Eigen::Vector3d zero = Eigen::Vector3d::Zero();
+    constexpr double kNaN = std::numeric_limits<double>::quiet_NaN();
+
+    std::vector<ImuMeasurement> stream = make_stream_5();
+    stream[4].accel_mps2.x() = kNaN;  // outside window [0.0, 0.3]
+
+    EXPECT_THROW(integrate_window(stream, 0.0, 0.3, zero, zero), std::invalid_argument);
+}
+
+// --- window coverage ---
+
+TEST(IntegrateWindow, WindowOutsideStreamRangeThrows) {
+    const Eigen::Vector3d zero = Eigen::Vector3d::Zero();
+    const auto stream = make_stream_5();  // t in [0.0, 0.4]
+
+    // Entirely before
+    EXPECT_THROW(integrate_window(stream, -0.3, -0.1, zero, zero), std::invalid_argument);
+    // Entirely after
+    EXPECT_THROW(integrate_window(stream, 0.5,  0.9,  zero, zero), std::invalid_argument);
+}
+
+TEST(IntegrateWindow, TooFewMeasurementsInWindowThrows) {
+    const Eigen::Vector3d zero = Eigen::Vector3d::Zero();
+    // Stream: t = 0.0, 0.1, 0.5, 0.6
+    // Window [0.2, 0.4] contains no measurements -> fewer than 2
+    std::vector<ImuMeasurement> stream = {
+        make_timed_meas(0.0), make_timed_meas(0.1),
+        make_timed_meas(0.5), make_timed_meas(0.6)
+    };
+    EXPECT_THROW(integrate_window(stream, 0.2, 0.4, zero, zero), std::invalid_argument);
+
+    // Window [0.1, 0.49] contains exactly 1 measurement (t=0.1)
+    EXPECT_THROW(integrate_window(stream, 0.1, 0.49, zero, zero), std::invalid_argument);
+}
+
+// --- correct accumulation ---
+
+// Window [0.1, 0.3] selects measurements at t=0.1, 0.2, 0.3 from a 5-element
+// stream. Result must equal integrate_sequence on that explicit slice.
+TEST(IntegrateWindow, MatchesManualSlice) {
+    const Eigen::Vector3d gyro_bias{0.01, -0.02, 0.03};
+    const Eigen::Vector3d accel_bias{0.1,  0.2,  -0.1};
+
+    const std::vector<ImuMeasurement> stream = {
+        make_timed_meas(0.00,  0.1,  0.0, -0.05,  0.5, -0.3,  0.2),
+        make_timed_meas(0.10,  0.0,  0.2,  0.10, -0.1,  0.4, -0.3),
+        make_timed_meas(0.20, -0.05, 0.1,  0.00,  0.2,  0.1,  0.5),
+        make_timed_meas(0.30,  0.2, -0.1,  0.05, -0.2, -0.1,  0.3),
+        make_timed_meas(0.40,  0.0,  0.0,  0.10,  0.3,  0.2, -0.1),
+    };
+
+    // Manual slice: indices 1..3
+    const std::vector<ImuMeasurement> slice = {stream[1], stream[2], stream[3]};
+    const PreintegratedImu expected = integrate_sequence(slice, gyro_bias, accel_bias);
+
+    const PreintegratedImu result = integrate_window(stream, 0.10, 0.30, gyro_bias, accel_bias);
+
+    EXPECT_TRUE(result.delta_R.isApprox(expected.delta_R, 1e-12));
+    EXPECT_TRUE(result.delta_v.isApprox(expected.delta_v, 1e-12));
+    EXPECT_TRUE(result.delta_p.isApprox(expected.delta_p, 1e-12));
+    EXPECT_NEAR(result.delta_t_s, expected.delta_t_s, 1e-12);
+}
+
+// Large accel outside the window, zero motion inside: result must be zero.
+// Confirms that out-of-window measurements are excluded.
+TEST(IntegrateWindow, ExcludesOutsideMeasurements) {
+    const Eigen::Vector3d zero = Eigen::Vector3d::Zero();
+
+    std::vector<ImuMeasurement> stream = {
+        make_timed_meas(0.0, 0, 0, 0, 100.0, 100.0, 100.0),  // outside: before window
+        make_timed_meas(0.1),                                   // inside: zero motion
+        make_timed_meas(0.2),                                   // inside: zero motion
+        make_timed_meas(0.3),                                   // inside: zero motion
+        make_timed_meas(0.4, 0, 0, 0, 100.0, 100.0, 100.0),   // outside: after window
+    };
+
+    const PreintegratedImu result = integrate_window(stream, 0.1, 0.3, zero, zero);
+
+    EXPECT_TRUE(result.delta_R.isApprox(Eigen::Matrix3d::Identity(), 1e-9));
+    EXPECT_TRUE(result.delta_v.isApprox(Eigen::Vector3d::Zero(), 1e-9));
+    EXPECT_TRUE(result.delta_p.isApprox(Eigen::Vector3d::Zero(), 1e-9));
+    EXPECT_NEAR(result.delta_t_s, 0.2, 1e-9);
+}
+
+// Measurement == bias for all in-window samples -> zero net motion.
+TEST(IntegrateWindow, BiasCancellationOverWindow) {
+    const Eigen::Vector3d gyro_bias{0.1, 0.2, 0.3};
+    const Eigen::Vector3d accel_bias{1.0, 2.0, 3.0};
+
+    std::vector<ImuMeasurement> stream;
+    for (int i = 0; i < 5; ++i) {
+        stream.push_back(make_timed_meas(
+            i * 0.05,
+            gyro_bias.x(), gyro_bias.y(), gyro_bias.z(),
+            accel_bias.x(), accel_bias.y(), accel_bias.z()));
+    }
+
+    // Window covers indices 1..3 (t = 0.05, 0.10, 0.15)
+    const PreintegratedImu result =
+        integrate_window(stream, 0.05, 0.15, gyro_bias, accel_bias);
+
+    EXPECT_TRUE(result.delta_R.isApprox(Eigen::Matrix3d::Identity(), 1e-9));
+    EXPECT_TRUE(result.delta_v.isApprox(Eigen::Vector3d::Zero(), 1e-9));
+    EXPECT_TRUE(result.delta_p.isApprox(Eigen::Vector3d::Zero(), 1e-9));
 }

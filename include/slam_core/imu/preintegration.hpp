@@ -55,4 +55,27 @@ PreintegratedImu integrate_sequence(
     const Eigen::Vector3d&             gyro_bias_radps,
     const Eigen::Vector3d&             accel_bias_mps2);
 
+// Integrate all measurements from stream whose timestamps fall within
+// [t_start_s, t_end_s] (inclusive on both ends).
+//
+// Boundary policy: contained measurements only — no interpolation is performed
+// at either boundary. Measurements outside the window are excluded entirely.
+// As a result, result.delta_t_s may be smaller than (t_end_s - t_start_s) if
+// no measurements land exactly on the requested boundary times.
+//
+// Throws std::invalid_argument if:
+//   - gyro_bias_radps or accel_bias_mps2 contain non-finite values
+//   - t_start_s or t_end_s are non-finite
+//   - t_start_s >= t_end_s
+//   - stream is empty
+//   - any measurement in stream contains non-finite values
+//   - stream timestamps are not strictly increasing
+//   - fewer than 2 measurements fall within [t_start_s, t_end_s]
+PreintegratedImu integrate_window(
+    const std::vector<ImuMeasurement>& stream,
+    double                             t_start_s,
+    double                             t_end_s,
+    const Eigen::Vector3d&             gyro_bias_radps,
+    const Eigen::Vector3d&             accel_bias_mps2);
+
 }  // namespace slam_core::imu

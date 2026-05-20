@@ -81,4 +81,59 @@ PreintegratedImu integrate_sequence(
     return preint;
 }
 
+PreintegratedImu integrate_window(
+    const std::vector<ImuMeasurement>& stream,
+    double                             t_start_s,
+    double                             t_end_s,
+    const Eigen::Vector3d&             gyro_bias_radps,
+    const Eigen::Vector3d&             accel_bias_mps2)
+{
+    if (!gyro_bias_radps.allFinite()) {
+        throw std::invalid_argument(
+            "integrate_window: gyro_bias_radps contains non-finite values");
+    }
+    if (!accel_bias_mps2.allFinite()) {
+        throw std::invalid_argument(
+            "integrate_window: accel_bias_mps2 contains non-finite values");
+    }
+    if (!std::isfinite(t_start_s) || !std::isfinite(t_end_s)) {
+        throw std::invalid_argument(
+            "integrate_window: t_start_s and t_end_s must be finite");
+    }
+    if (t_start_s >= t_end_s) {
+        throw std::invalid_argument(
+            "integrate_window: t_start_s must be strictly less than t_end_s");
+    }
+    if (stream.empty()) {
+        throw std::invalid_argument(
+            "integrate_window: stream is empty");
+    }
+    for (const auto& m : stream) {
+        if (!is_finite(m)) {
+            throw std::invalid_argument(
+                "integrate_window: stream contains a non-finite measurement");
+        }
+    }
+    for (std::size_t i = 0; i + 1 < stream.size(); ++i) {
+        if (stream[i + 1].timestamp_s <= stream[i].timestamp_s) {
+            throw std::invalid_argument(
+                "integrate_window: stream timestamps are not strictly increasing");
+        }
+    }
+
+    std::vector<ImuMeasurement> window;
+    for (const auto& m : stream) {
+        if (m.timestamp_s >= t_start_s && m.timestamp_s <= t_end_s) {
+            window.push_back(m);
+        }
+    }
+
+    if (window.size() < 2) {
+        throw std::invalid_argument(
+            "integrate_window: fewer than 2 measurements in [t_start_s, t_end_s]");
+    }
+
+    return integrate_sequence(window, gyro_bias_radps, accel_bias_mps2);
+}
+
 }  // namespace slam_core::imu
