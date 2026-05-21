@@ -28,3 +28,7 @@ gtest_discover_tests(test_preintegration)
 add_executable(test_imu_initialization test_imu_initialization.cpp)
 target_link_libraries(test_imu_initialization PRIVATE GTest::gtest_main slam_core)
 gtest_discover_tests(test_imu_initialization)
+
+add_executable(test_pinhole_camera test_pinhole_camera.cpp)
+target_link_libraries(test_pinhole_camera PRIVATE GTest::gtest_main slam_core)
+gtest_discover_tests(test_pinhole_camera)
