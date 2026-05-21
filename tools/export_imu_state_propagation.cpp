@@ -3,8 +3,11 @@
 // Usage:
 //   export_imu_state_propagation <euroc_imu_csv_path> <output_csv_path>
 //                                [--init-from-gt]
+//                                [--init-from-stationary <duration_s>]
 //                                [--gyro-bias bx by bz]
 //                                [--accel-bias bx by bz]
+//
+// --init-from-gt and --init-from-stationary are mutually exclusive.
 //
 // Input:  EuRoC IMU CSV — columns: timestamp_ns, wx, wy, wz, ax, ay, az
 //
@@ -12,10 +15,14 @@
 //               r00..r22 (row-major R_W_B), gyro_bias_x/y/z, accel_bias_x/y/z
 //
 // Propagation:
-//   state[0] is initialized at the first IMU timestamp.
+//   state[0] is initialized at the first IMU timestamp (default/stationary)
+//   or at the first IMU timestamp >= gt_start (--init-from-gt).
 //   Default: identity R, zero p/v/biases.
 //   --init-from-gt: IMU rows before gt_start are skipped; state is initialized
 //     at the first IMU timestamp >= gt_start using the nearest GT sample.
+//   --init-from-stationary <duration_s>: R_W_B estimated from the first
+//     duration_s seconds of raw IMU accel measurements (no bias correction);
+//     p=0, v=0. Gravity-only: constrains roll/pitch; yaw is unobservable.
 //   state[i+1] is produced by propagate_imu_state(state[i], meas[i], gravity_W, dt)
 //   where meas[i] is the EuRoC measurement at t[i] and dt = t[i+1] - t[i].
 //   Zeroth-order hold: meas[i] is applied constant over [t[i], t[i+1]].
@@ -24,6 +31,8 @@
 //   Biases default to zero; supply --gyro-bias / --accel-bias for offline validation.
 //   Convention: omega_corrected = omega_meas - gyro_bias;
 //               accel_corrected = accel_meas - accel_bias.
+//   Note: --gyro-bias / --accel-bias apply to propagation only. They are not
+//   applied to the stationary initialization window.
 
 #include <cmath>
 #include <cstdlib>
@@ -41,6 +50,7 @@
 #include "slam_core/geometry/so3.hpp"
 #include "slam_core/imu/imu_measurement.hpp"
 #include "slam_core/imu/imu_state.hpp"
+#include "slam_core/imu/initialization.hpp"
 
 namespace {
 
@@ -156,21 +166,40 @@ int main(int argc, char* argv[]) {
         "Usage: export_imu_state_propagation"
         " <euroc_imu_csv_path> <output_csv_path>"
         " [--init-from-gt]"
+        " [--init-from-stationary <duration_s>]"
         " [--gyro-bias bx by bz]"
         " [--accel-bias bx by bz]\n";
 
     if (argc < 3) { std::cerr << usage; return EXIT_FAILURE; }
 
-    bool            init_from_gt      = false;
-    bool            use_gyro_bias     = false;
-    bool            use_accel_bias    = false;
-    Eigen::Vector3d gyro_bias_radps   = Eigen::Vector3d::Zero();
-    Eigen::Vector3d accel_bias_mps2   = Eigen::Vector3d::Zero();
+    bool            init_from_gt          = false;
+    bool            init_from_stationary  = false;
+    double          stationary_duration_s = 0.0;
+    bool            use_gyro_bias         = false;
+    bool            use_accel_bias        = false;
+    Eigen::Vector3d gyro_bias_radps       = Eigen::Vector3d::Zero();
+    Eigen::Vector3d accel_bias_mps2       = Eigen::Vector3d::Zero();
 
     for (int i = 3; i < argc; ++i) {
         const std::string arg(argv[i]);
         if (arg == "--init-from-gt") {
             init_from_gt = true;
+        } else if (arg == "--init-from-stationary") {
+            if (i + 1 >= argc) {
+                std::cerr << "Error: --init-from-stationary requires a duration in seconds\n";
+                return EXIT_FAILURE;
+            }
+            try {
+                stationary_duration_s = std::stod(argv[++i]);
+            } catch (...) {
+                std::cerr << "Error: --init-from-stationary duration must be numeric\n";
+                return EXIT_FAILURE;
+            }
+            if (!std::isfinite(stationary_duration_s) || stationary_duration_s <= 0.0) {
+                std::cerr << "Error: --init-from-stationary duration must be finite and positive\n";
+                return EXIT_FAILURE;
+            }
+            init_from_stationary = true;
         } else if (arg == "--gyro-bias" || arg == "--accel-bias") {
             if (i + 3 >= argc) {
                 std::cerr << "Error: " << arg << " requires three values\n";
@@ -190,6 +219,11 @@ int main(int argc, char* argv[]) {
             std::cerr << "Error: unknown argument: " << arg << '\n' << usage;
             return EXIT_FAILURE;
         }
+    }
+
+    if (init_from_gt && init_from_stationary) {
+        std::cerr << "Error: --init-from-gt and --init-from-stationary are mutually exclusive\n";
+        return EXIT_FAILURE;
     }
 
     std::ifstream in_file(argv[1]);
@@ -242,6 +276,11 @@ int main(int argc, char* argv[]) {
     bool   saw_first_imu   = false;
     double first_raw_imu_t = 0.0;
 
+    // Stationary window state: measurements with timestamp_s <= first_t + duration_s.
+    bool collecting_window = init_from_stationary;
+    std::vector<slam_core::imu::ImuMeasurement> stationary_window;
+    double window_end_t = 0.0;
+
     while (std::getline(in_file, line)) {
         if (line.empty() || line[0] == '#') continue;
         if (!parse_imu_row(line, curr_meas)) {
@@ -253,6 +292,68 @@ int main(int argc, char* argv[]) {
         if (!saw_first_imu) {
             first_raw_imu_t = curr_meas.timestamp_s;
             saw_first_imu = true;
+        }
+
+        // --- stationary window collection ---
+        if (collecting_window) {
+            if (stationary_window.empty()) {
+                window_end_t = curr_meas.timestamp_s + stationary_duration_s;
+            }
+            if (curr_meas.timestamp_s <= window_end_t) {
+                stationary_window.push_back(curr_meas);
+                continue;
+            }
+
+            // Window complete. Estimate R_W_B from raw accel — no bias correction.
+            // Biases are propagation-only options; they must not be applied here.
+            Eigen::Matrix3d R_init;
+            try {
+                R_init = slam_core::imu::estimate_R_W_B_from_stationary(
+                    stationary_window, gravity_W);
+            } catch (const std::invalid_argument& e) {
+                std::cerr << "Error: stationary initialization failed: " << e.what() << '\n';
+                return EXIT_FAILURE;
+            }
+
+            state.timestamp_s     = stationary_window.back().timestamp_s;
+            state.R_W_B           = R_init;
+            state.p_W_B           = Eigen::Vector3d::Zero();
+            state.v_W_B           = Eigen::Vector3d::Zero();
+            state.gyro_bias_radps = use_gyro_bias  ? gyro_bias_radps : Eigen::Vector3d::Zero();
+            state.accel_bias_mps2 = use_accel_bias ? accel_bias_mps2 : Eigen::Vector3d::Zero();
+
+            std::cerr << "export_imu_state_propagation: --init-from-stationary\n"
+                      << "  stationary duration:   " << stationary_duration_s << " s\n"
+                      << "  window measurements:   " << stationary_window.size() << '\n'
+                      << "  window t:              ["
+                          << stationary_window.front().timestamp_s << ", "
+                          << stationary_window.back().timestamp_s << "] s\n"
+                      << "  initial state t:       " << state.timestamp_s << " s\n"
+                      << "  initial p:             [0, 0, 0] m\n"
+                      << "  initial v:             [0, 0, 0] m/s\n"
+                      << "  estimated R_W_B (gravity-only: roll/pitch constrained, yaw arbitrary):\n"
+                      << "    [" << R_init(0,0) << ", " << R_init(0,1) << ", " << R_init(0,2) << "]\n"
+                      << "    [" << R_init(1,0) << ", " << R_init(1,1) << ", " << R_init(1,2) << "]\n"
+                      << "    [" << R_init(2,0) << ", " << R_init(2,1) << ", " << R_init(2,2) << "]\n"
+                      << "  gyro bias:    "
+                          << (use_gyro_bias ? "enabled" : "disabled")
+                          << "  [" << state.gyro_bias_radps.x()
+                          << ", " << state.gyro_bias_radps.y()
+                          << ", " << state.gyro_bias_radps.z() << "] rad/s\n"
+                      << "  accel bias:   "
+                          << (use_accel_bias ? "enabled (propagation only; not applied to init window)"
+                                            : "disabled")
+                          << "  [" << state.accel_bias_mps2.x()
+                          << ", " << state.accel_bias_mps2.y()
+                          << ", " << state.accel_bias_mps2.z() << "] m/s²\n";
+
+            write_row(out_file, state);
+            ++written;
+            prev_meas = stationary_window.back();
+            have_prev = true;
+            collecting_window = false;
+            // fall through: curr_meas is the first post-window measurement;
+            // it will be processed as the first propagation step below.
         }
 
         // Skip IMU rows that predate GT coverage when initializing from GT.
@@ -375,6 +476,18 @@ int main(int argc, char* argv[]) {
         write_row(out_file, state);
         ++written;
         prev_meas = curr_meas;
+    }
+
+    if (collecting_window) {
+        if (stationary_window.empty()) {
+            std::cerr << "Error: IMU CSV has no parseable rows\n";
+        } else {
+            std::cerr << "Error: --init-from-stationary: all "
+                      << stationary_window.size()
+                      << " IMU measurements fall within the stationary window ("
+                      << stationary_duration_s << " s). No measurements remain for propagation.\n";
+        }
+        return EXIT_FAILURE;
     }
 
     if (init_from_gt && !have_prev) {
