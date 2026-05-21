@@ -31,6 +31,11 @@ struct PinholeCamera {
     // Throws if project(p_C) would throw.
     Eigen::Vector2d reprojection_error(const Eigen::Vector3d& p_C,
                                        const Eigen::Vector2d& observed_px) const;
+
+    // Unprojects pixel [u, v] to a unit-length bearing vector in camera frame C.
+    // x = (u - cx) / fx,  y = (v - cy) / fy,  bearing = normalize([x, y, 1])
+    // Throws std::invalid_argument if pixel has non-finite coordinates.
+    Eigen::Vector3d unproject_to_bearing(const Eigen::Vector2d& pixel) const;
 };
 
 }  // namespace slam_core::camera

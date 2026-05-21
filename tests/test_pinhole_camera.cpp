@@ -107,3 +107,69 @@ TEST(PinholeCamera, InvalidPoint_NegativeZ) {
     PinholeCamera cam(400.0, 400.0, 320.0, 240.0);
     EXPECT_THROW(cam.project({0.0, 0.0, -1.0}), std::invalid_argument);
 }
+
+// --- 15. Unproject principal point -> [0, 0, 1] ---
+
+TEST(PinholeCamera, Unproject_PrincipalPoint) {
+    PinholeCamera cam(400.0, 400.0, 320.0, 240.0);
+    const Eigen::Vector3d b = cam.unproject_to_bearing({320.0, 240.0});
+    EXPECT_NEAR(b.x(), 0.0, 1e-12);
+    EXPECT_NEAR(b.y(), 0.0, 1e-12);
+    EXPECT_NEAR(b.z(), 1.0, 1e-12);
+}
+
+// --- 16. Unproject one focal length to the right -> normalize([1, 0, 1]) ---
+
+TEST(PinholeCamera, Unproject_OneFocalLengthRight) {
+    PinholeCamera cam(400.0, 400.0, 320.0, 240.0);
+    const Eigen::Vector3d b = cam.unproject_to_bearing({720.0, 240.0});
+    const Eigen::Vector3d expected = Eigen::Vector3d(1.0, 0.0, 1.0).normalized();
+    EXPECT_NEAR(b.x(), expected.x(), 1e-12);
+    EXPECT_NEAR(b.y(), expected.y(), 1e-12);
+    EXPECT_NEAR(b.z(), expected.z(), 1e-12);
+}
+
+// --- 17. Unproject one focal length down -> normalize([0, 1, 1]) ---
+
+TEST(PinholeCamera, Unproject_OneFocalLengthDown) {
+    PinholeCamera cam(400.0, 400.0, 320.0, 240.0);
+    const Eigen::Vector3d b = cam.unproject_to_bearing({320.0, 640.0});
+    const Eigen::Vector3d expected = Eigen::Vector3d(0.0, 1.0, 1.0).normalized();
+    EXPECT_NEAR(b.x(), expected.x(), 1e-12);
+    EXPECT_NEAR(b.y(), expected.y(), 1e-12);
+    EXPECT_NEAR(b.z(), expected.z(), 1e-12);
+}
+
+// --- 18. General pixel produces expected normalized vector ---
+
+TEST(PinholeCamera, Unproject_GeneralPixel) {
+    // fx=500, fy=400, cx=320, cy=240; pixel=[570, 440]
+    // x = (570-320)/500 = 0.5,  y = (440-240)/400 = 0.5
+    // ray = [0.5, 0.5, 1],  norm = sqrt(1.5)
+    PinholeCamera cam(500.0, 400.0, 320.0, 240.0);
+    const Eigen::Vector3d b = cam.unproject_to_bearing({570.0, 440.0});
+    const Eigen::Vector3d expected = Eigen::Vector3d(0.5, 0.5, 1.0).normalized();
+    EXPECT_NEAR(b.x(), expected.x(), 1e-12);
+    EXPECT_NEAR(b.y(), expected.y(), 1e-12);
+    EXPECT_NEAR(b.z(), expected.z(), 1e-12);
+}
+
+// --- 19. Output norm is 1 ---
+
+TEST(PinholeCamera, Unproject_NormIsOne) {
+    PinholeCamera cam(600.0, 400.0, 320.0, 240.0);
+    const Eigen::Vector3d b = cam.unproject_to_bearing({450.0, 180.0});
+    EXPECT_NEAR(b.norm(), 1.0, 1e-12);
+}
+
+// --- 20. Non-finite pixel throws ---
+
+TEST(PinholeCamera, Unproject_NonFiniteU) {
+    PinholeCamera cam(400.0, 400.0, 320.0, 240.0);
+    EXPECT_THROW(cam.unproject_to_bearing({kNaN, 240.0}), std::invalid_argument);
+}
+
+TEST(PinholeCamera, Unproject_NonFiniteV) {
+    PinholeCamera cam(400.0, 400.0, 320.0, 240.0);
+    EXPECT_THROW(cam.unproject_to_bearing({320.0, kInf}), std::invalid_argument);
+}
