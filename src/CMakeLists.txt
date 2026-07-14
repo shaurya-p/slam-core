@@ -7,6 +7,7 @@ add_library(slam_core STATIC
     imu/preintegration.cpp
     imu/initialization.cpp
     camera/pinhole_camera.cpp
+    io/euroc_csv.cpp
 )
 
 target_include_directories(slam_core PUBLIC ${PROJECT_SOURCE_DIR}/include)

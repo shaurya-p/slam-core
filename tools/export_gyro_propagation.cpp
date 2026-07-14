@@ -5,13 +5,12 @@
 //   export_gyro_propagation <euroc_imu_csv_path> <output_csv_path> --gyro-bias bx by bz
 //
 // Input:  EuRoC IMU CSV — columns: timestamp_ns, wx, wy, wz, ax, ay, az
-//                         Gyro is columns 1,2,3 (wx, wy, wz) immediately after timestamp.
 //
 // Output: CSV — timestamp_s, r00..r22 (row-major R_W_B entries)
 //               R_W_B maps body frame B into world frame W.
 //               Initialized to identity at t0.
 //               Default: R_W_B_next = R_W_B * exp_so3(gyro_radps * dt_s)
-//               With --gyro-bias: applies propagate_gyro_biascorrected using user-provided bias.
+//               With --gyro-bias: bias is subtracted before integration.
 //               Zeroth-order hold: gyro at t_i is applied over [t_i, t_{i+1}].
 //
 // --gyro-bias bx by bz:
@@ -24,40 +23,16 @@
 #include <fstream>
 #include <iomanip>
 #include <iostream>
-#include <sstream>
 #include <string>
+#include <vector>
 
 #include <Eigen/Core>
 
 #include "slam_core/imu/gyro_propagation.hpp"
+#include "slam_core/imu/imu_measurement.hpp"
+#include "slam_core/io/euroc_csv.hpp"
 
 namespace {
-
-struct ImuRow {
-    double          timestamp_s;  // seconds
-    Eigen::Vector3d gyro_radps;   // body frame, rad/s (wx, wy, wz — columns 1,2,3)
-};
-
-// EuRoC IMU CSV: timestamp_ns, wx, wy, wz, ax, ay, az
-// Parse only the first 4 columns; accel is not used.
-bool parse_imu_row(const std::string& line, ImuRow& out) {
-    std::istringstream ss(line);
-    std::string tok;
-    double vals[4];
-    for (int i = 0; i < 4; ++i) {
-        if (!std::getline(ss, tok, ',')) return false;
-        try {
-            vals[i] = std::stod(tok);
-        } catch (...) {
-            return false;
-        }
-    }
-    // col 0: timestamp_ns -> seconds
-    out.timestamp_s = vals[0] * 1e-9;
-    // cols 1,2,3: wx, wy, wz
-    out.gyro_radps = Eigen::Vector3d{vals[1], vals[2], vals[3]};
-    return true;
-}
 
 void write_row(std::ofstream& out, double timestamp_s,
                const Eigen::Matrix3d& R_W_B) {
@@ -98,11 +73,17 @@ int main(int argc, char* argv[]) {
         use_bias_correction = true;
     }
 
-    std::ifstream in_file(argv[1]);
-    if (!in_file.is_open()) {
-        std::cerr << "Error: cannot open input: " << argv[1] << '\n';
+    std::vector<slam_core::imu::ImuMeasurement> imu_data;
+    int parse_skipped = 0;
+    try {
+        imu_data = slam_core::io::read_euroc_imu_csv(argv[1], &parse_skipped);
+    } catch (const std::exception& e) {
+        std::cerr << "Error: " << e.what() << '\n';
         return EXIT_FAILURE;
     }
+    if (parse_skipped > 0)
+        std::cerr << "Warning: " << parse_skipped
+                  << " IMU rows skipped (unparseable)\n";
 
     std::ofstream out_file(argv[2]);
     if (!out_file.is_open()) {
@@ -122,57 +103,33 @@ int main(int argc, char* argv[]) {
         std::cerr << "export_gyro_propagation: bias correction disabled (raw gyro)\n";
     }
 
-    // Skip EuRoC CSV header line
-    std::string line;
-    if (!std::getline(in_file, line)) {
-        std::cerr << "Error: input CSV is empty\n";
-        return EXIT_FAILURE;
-    }
-
     // R_W_B: rotation mapping body frame B into world frame W.
-    // Initialized to identity — no gravity alignment, no bias correction.
+    // Initialized to identity — no gravity alignment.
     Eigen::Matrix3d R_W_B = Eigen::Matrix3d::Identity();
 
-    ImuRow prev{}, curr{};
-    bool have_prev = false;
-    int written = 0, skipped = 0;
+    // Write identity orientation at the first timestamp (before integration).
+    write_row(out_file, imu_data.front().timestamp_s, R_W_B);
+    int written = 1, skipped = 0;
 
-    while (std::getline(in_file, line)) {
-        if (line.empty() || line[0] == '#') continue;
-        if (!parse_imu_row(line, curr)) {
-            std::cerr << "Warning: unparseable row skipped\n";
-            ++skipped;
-            continue;
-        }
-
-        if (!have_prev) {
-            // Write identity orientation at the first timestamp (before integration).
-            write_row(out_file, curr.timestamp_s, R_W_B);
-            ++written;
-            prev = curr;
-            have_prev = true;
-            continue;
-        }
+    for (std::size_t i = 0; i + 1 < imu_data.size(); ++i) {
+        const slam_core::imu::ImuMeasurement& prev = imu_data[i];
+        const slam_core::imu::ImuMeasurement& curr = imu_data[i + 1];
 
         const double dt_s = curr.timestamp_s - prev.timestamp_s;
         if (dt_s <= 0.0 || !std::isfinite(dt_s)) {
             std::cerr << "Warning: non-positive dt_s=" << dt_s
                       << " at t=" << curr.timestamp_s << ", skipping interval\n";
             ++skipped;
-            prev = curr;
             continue;
         }
 
         // Zeroth-order hold: apply prev.gyro over [prev.timestamp_s, curr.timestamp_s].
-        if (use_bias_correction) {
-            R_W_B = slam_core::imu::propagate_gyro_bias_corrected(
-                R_W_B, prev.gyro_radps, gyro_bias, dt_s);
-        } else {
-            R_W_B = slam_core::imu::propagate_gyro(R_W_B, prev.gyro_radps, dt_s);
-        }
+        R_W_B = use_bias_correction
+                    ? slam_core::imu::propagate_gyro_bias_corrected(
+                          R_W_B, prev.gyro_radps, gyro_bias, dt_s)
+                    : slam_core::imu::propagate_gyro(R_W_B, prev.gyro_radps, dt_s);
         write_row(out_file, curr.timestamp_s, R_W_B);
         ++written;
-        prev = curr;
     }
 
     std::cerr << "export_gyro_propagation: wrote " << written << " rows";

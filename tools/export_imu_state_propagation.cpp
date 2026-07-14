@@ -40,97 +40,18 @@
 #include <fstream>
 #include <iomanip>
 #include <iostream>
-#include <sstream>
 #include <string>
 #include <vector>
 
 #include <Eigen/Core>
 #include <Eigen/Geometry>
 
-#include "slam_core/geometry/so3.hpp"
 #include "slam_core/imu/imu_measurement.hpp"
 #include "slam_core/imu/imu_state.hpp"
 #include "slam_core/imu/initialization.hpp"
+#include "slam_core/io/euroc_csv.hpp"
 
 namespace {
-
-// EuRoC IMU CSV: timestamp_ns, wx, wy, wz, ax, ay, az
-bool parse_imu_row(const std::string& line,
-                   slam_core::imu::ImuMeasurement& out) {
-    std::istringstream ss(line);
-    std::string tok;
-    double vals[7];
-    for (int i = 0; i < 7; ++i) {
-        if (!std::getline(ss, tok, ',')) return false;
-        try {
-            vals[i] = std::stod(tok);
-        } catch (...) {
-            return false;
-        }
-    }
-    out.timestamp_s = vals[0] * 1e-9;                          // ns -> s
-    out.gyro_radps  = {vals[1], vals[2], vals[3]};             // wx, wy, wz
-    out.accel_mps2  = {vals[4], vals[5], vals[6]};             // ax, ay, az
-    return true;
-}
-
-// EuRoC GT CSV: timestamp_ns, p_x, p_y, p_z, q_w, q_x, q_y, q_z, v_x, v_y, v_z, ...
-struct GtSample {
-    double timestamp_s;
-    Eigen::Vector3d p;           // position in world [m]
-    double q_w, q_x, q_y, q_z;  // quaternion (Hamilton, w scalar first)
-    Eigen::Vector3d v;           // velocity in world [m/s]
-};
-
-bool parse_gt_row(const std::string& line, GtSample& out) {
-    std::istringstream ss(line);
-    std::string tok;
-    double vals[11];
-    for (int i = 0; i < 11; ++i) {
-        if (!std::getline(ss, tok, ',')) return false;
-        try { vals[i] = std::stod(tok); } catch (...) { return false; }
-    }
-    out.timestamp_s = vals[0] * 1e-9;
-    out.p  = {vals[1], vals[2], vals[3]};
-    out.q_w = vals[4]; out.q_x = vals[5]; out.q_y = vals[6]; out.q_z = vals[7];
-    out.v  = {vals[8], vals[9], vals[10]};
-    return true;
-}
-
-std::vector<GtSample> read_gt_csv(const std::string& path) {
-    std::ifstream f(path);
-    if (!f.is_open()) {
-        std::cerr << "Error: cannot open GT CSV: " << path << '\n';
-        std::exit(EXIT_FAILURE);
-    }
-    std::string line;
-    std::getline(f, line);  // read header
-    std::cerr << "  GT CSV header: " << line << '\n';
-    std::vector<GtSample> samples;
-    int skipped = 0;
-    while (std::getline(f, line)) {
-        if (line.empty() || line[0] == '#') continue;
-        GtSample s;
-        if (parse_gt_row(line, s)) samples.push_back(s);
-        else ++skipped;
-    }
-    if (skipped > 0)
-        std::cerr << "Warning: " << skipped << " GT rows skipped (unparseable)\n";
-    return samples;
-}
-
-// Nearest-neighbor by absolute timestamp difference (linear scan; GT ≤ ~36k rows).
-// Timestamps are sorted ascending: once we pass ts the distance grows monotonically.
-const GtSample& nearest_gt(double ts, const std::vector<GtSample>& samples) {
-    std::size_t best = 0;
-    double best_dt = std::abs(samples[0].timestamp_s - ts);
-    for (std::size_t i = 1; i < samples.size(); ++i) {
-        const double dt = std::abs(samples[i].timestamp_s - ts);
-        if (dt < best_dt) { best_dt = dt; best = i; }
-        if (samples[i].timestamp_s >= ts) break;
-    }
-    return samples[best];
-}
 
 void write_header(std::ofstream& out) {
     out << "timestamp_s"
@@ -226,11 +147,17 @@ int main(int argc, char* argv[]) {
         return EXIT_FAILURE;
     }
 
-    std::ifstream in_file(argv[1]);
-    if (!in_file.is_open()) {
-        std::cerr << "Error: cannot open input: " << argv[1] << '\n';
+    std::vector<slam_core::imu::ImuMeasurement> imu_data;
+    int parse_skipped = 0;
+    try {
+        imu_data = slam_core::io::read_euroc_imu_csv(argv[1], &parse_skipped);
+    } catch (const std::exception& e) {
+        std::cerr << "Error: " << e.what() << '\n';
         return EXIT_FAILURE;
     }
+    if (parse_skipped > 0)
+        std::cerr << "Warning: " << parse_skipped
+                  << " IMU rows skipped (unparseable)\n";
 
     std::ofstream out_file(argv[2]);
     if (!out_file.is_open()) {
@@ -240,28 +167,26 @@ int main(int argc, char* argv[]) {
     out_file << std::setprecision(12) << std::fixed;
     write_header(out_file);
 
-    // Skip EuRoC CSV header line
-    std::string line;
-    if (!std::getline(in_file, line)) {
-        std::cerr << "Error: input CSV is empty\n";
-        return EXIT_FAILURE;
-    }
-
     // Load GT samples when requested.
     // IMU path: <seq_root>/mav0/imu0/data.csv
     // GT path:  <seq_root>/mav0/state_groundtruth_estimate0/data.csv
-    std::vector<GtSample> gt_samples;
+    std::vector<slam_core::io::EurocGtSample> gt_samples;
     double gt_start = 0.0, gt_end = 0.0;
     if (init_from_gt) {
         namespace fs = std::filesystem;
         const fs::path gt_path =
             fs::path(argv[1]).parent_path().parent_path()
             / "state_groundtruth_estimate0" / "data.csv";
-        gt_samples = read_gt_csv(gt_path.string());
-        if (gt_samples.empty()) {
-            std::cerr << "Error: GT CSV is empty: " << gt_path << '\n';
+        int gt_skipped = 0;
+        try {
+            gt_samples = slam_core::io::read_euroc_gt_csv(gt_path, &gt_skipped);
+        } catch (const std::exception& e) {
+            std::cerr << "Error: " << e.what() << '\n';
             return EXIT_FAILURE;
         }
+        if (gt_skipped > 0)
+            std::cerr << "Warning: " << gt_skipped
+                      << " GT rows skipped (unparseable)\n";
         gt_start = gt_samples.front().timestamp_s;
         gt_end   = gt_samples.back().timestamp_s;
     }
@@ -269,31 +194,18 @@ int main(int argc, char* argv[]) {
     const Eigen::Vector3d gravity_W{0.0, 0.0, -9.81};
 
     slam_core::imu::ImuState state{};
-    slam_core::imu::ImuMeasurement prev_meas{}, curr_meas{};
+    slam_core::imu::ImuMeasurement prev_meas{};
     bool have_prev = false;
     int written = 0, skipped = 0;
 
-    bool   saw_first_imu   = false;
-    double first_raw_imu_t = 0.0;
+    const double first_raw_imu_t = imu_data.front().timestamp_s;
 
     // Stationary window state: measurements with timestamp_s <= first_t + duration_s.
     bool collecting_window = init_from_stationary;
     std::vector<slam_core::imu::ImuMeasurement> stationary_window;
     double window_end_t = 0.0;
 
-    while (std::getline(in_file, line)) {
-        if (line.empty() || line[0] == '#') continue;
-        if (!parse_imu_row(line, curr_meas)) {
-            std::cerr << "Warning: unparseable row skipped\n";
-            ++skipped;
-            continue;
-        }
-
-        if (!saw_first_imu) {
-            first_raw_imu_t = curr_meas.timestamp_s;
-            saw_first_imu = true;
-        }
-
+    for (const slam_core::imu::ImuMeasurement& curr_meas : imu_data) {
         // --- stationary window collection ---
         if (collecting_window) {
             if (stationary_window.empty()) {
@@ -374,20 +286,12 @@ int main(int argc, char* argv[]) {
             state.accel_bias_mps2 = use_accel_bias ? accel_bias_mps2 : Eigen::Vector3d::Zero();
 
             if (init_from_gt) {
-                const GtSample& gt = nearest_gt(curr_meas.timestamp_s, gt_samples);
+                const slam_core::io::EurocGtSample& gt =
+                    slam_core::io::nearest_gt(curr_meas.timestamp_s, gt_samples);
 
-                const double q_norm = std::sqrt(
-                    gt.q_w*gt.q_w + gt.q_x*gt.q_x + gt.q_y*gt.q_y + gt.q_z*gt.q_z);
-                if (q_norm < 1e-10) {
-                    std::cerr << "Error: GT quaternion norm near zero at t="
-                              << gt.timestamp_s << '\n';
-                    return EXIT_FAILURE;
-                }
-                const Eigen::Quaterniond q(
-                    gt.q_w/q_norm, gt.q_x/q_norm, gt.q_y/q_norm, gt.q_z/q_norm);
-                state.R_W_B = q.toRotationMatrix();
-                state.p_W_B = gt.p;
-                state.v_W_B = gt.v;
+                state.R_W_B = gt.R_W_B();
+                state.p_W_B = gt.p_W_B;
+                state.v_W_B = gt.v_W_B;
 
                 std::cerr << "export_imu_state_propagation: --init-from-gt\n"
                           << "  first raw IMU t:  " << first_raw_imu_t << " s\n"
@@ -396,13 +300,13 @@ int main(int argc, char* argv[]) {
                           << "  matched GT t:     " << gt.timestamp_s << " s\n"
                           << "  GT-IMU offset:    " << (curr_meas.timestamp_s - gt.timestamp_s) << " s\n"
                           << "  initial p:    ["
-                              << gt.p.x() << ", " << gt.p.y() << ", " << gt.p.z() << "] m\n"
+                              << gt.p_W_B.x() << ", " << gt.p_W_B.y() << ", " << gt.p_W_B.z() << "] m\n"
                           << "  initial v:    ["
-                              << gt.v.x() << ", " << gt.v.y() << ", " << gt.v.z() << "] m/s\n"
-                          << "  initial q:    [w=" << gt.q_w/q_norm
-                              << ", x=" << gt.q_x/q_norm
-                              << ", y=" << gt.q_y/q_norm
-                              << ", z=" << gt.q_z/q_norm << "]\n"
+                              << gt.v_W_B.x() << ", " << gt.v_W_B.y() << ", " << gt.v_W_B.z() << "] m/s\n"
+                          << "  initial q:    [w=" << gt.q_W_B.w()
+                              << ", x=" << gt.q_W_B.x()
+                              << ", y=" << gt.q_W_B.y()
+                              << ", z=" << gt.q_W_B.z() << "]\n"
                           << "  gyro bias:    "
                               << (use_gyro_bias ? "enabled" : "disabled")
                               << "  [" << state.gyro_bias_radps.x()
@@ -436,7 +340,6 @@ int main(int argc, char* argv[]) {
             }
 
             // Initial world-frame acceleration: R_W_B * (accel - bias) + gravity_W.
-            // Biases are zero, so corrected_accel_B == curr_meas.accel_mps2.
             const Eigen::Vector3d corrected_accel_B =
                 curr_meas.accel_mps2 - state.accel_bias_mps2;
             const Eigen::Vector3d initial_accel_W =
@@ -479,25 +382,17 @@ int main(int argc, char* argv[]) {
     }
 
     if (collecting_window) {
-        if (stationary_window.empty()) {
-            std::cerr << "Error: IMU CSV has no parseable rows\n";
-        } else {
-            std::cerr << "Error: --init-from-stationary: all "
-                      << stationary_window.size()
-                      << " IMU measurements fall within the stationary window ("
-                      << stationary_duration_s << " s). No measurements remain for propagation.\n";
-        }
+        std::cerr << "Error: --init-from-stationary: all "
+                  << stationary_window.size()
+                  << " IMU measurements fall within the stationary window ("
+                  << stationary_duration_s << " s). No measurements remain for propagation.\n";
         return EXIT_FAILURE;
     }
 
     if (init_from_gt && !have_prev) {
-        if (!saw_first_imu) {
-            std::cerr << "Error: IMU CSV has no parseable rows\n";
-        } else {
-            std::cerr << "Error: no IMU sample with timestamp_s >= GT start ("
-                      << gt_start << " s). First IMU timestamp was "
-                      << first_raw_imu_t << " s.\n";
-        }
+        std::cerr << "Error: no IMU sample with timestamp_s >= GT start ("
+                  << gt_start << " s). First IMU timestamp was "
+                  << first_raw_imu_t << " s.\n";
         return EXIT_FAILURE;
     }
 

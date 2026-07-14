@@ -32,3 +32,7 @@ gtest_discover_tests(test_imu_initialization)
 add_executable(test_pinhole_camera test_pinhole_camera.cpp)
 target_link_libraries(test_pinhole_camera PRIVATE GTest::gtest_main slam_core)
 gtest_discover_tests(test_pinhole_camera)
+
+add_executable(test_euroc_csv test_euroc_csv.cpp)
+target_link_libraries(test_euroc_csv PRIVATE GTest::gtest_main slam_core)
+gtest_discover_tests(test_euroc_csv)

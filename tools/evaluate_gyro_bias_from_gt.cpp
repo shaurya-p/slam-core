@@ -35,7 +35,6 @@
 #include <iomanip>
 #include <iostream>
 #include <numeric>
-#include <sstream>
 #include <string>
 #include <vector>
 
@@ -45,85 +44,11 @@
 #include "slam_core/geometry/so3.hpp"
 #include "slam_core/imu/gyro_propagation.hpp"
 #include "slam_core/imu/imu_measurement.hpp"
+#include "slam_core/io/euroc_csv.hpp"
 
 namespace {
 
 constexpr double kPi = 3.14159265358979323846;
-
-// EuRoC IMU CSV: timestamp_ns, wx, wy, wz, ax, ay, az
-bool parse_imu_row(const std::string& line,
-                   slam_core::imu::ImuMeasurement& out) {
-    std::istringstream ss(line);
-    std::string tok;
-    double vals[7];
-    for (int i = 0; i < 7; ++i) {
-        if (!std::getline(ss, tok, ',')) return false;
-        try { vals[i] = std::stod(tok); } catch (...) { return false; }
-    }
-    out.timestamp_s = vals[0] * 1e-9;
-    out.gyro_radps  = {vals[1], vals[2], vals[3]};
-    out.accel_mps2  = {vals[4], vals[5], vals[6]};
-    return true;
-}
-
-// EuRoC GT CSV: timestamp_ns, p_x, p_y, p_z, q_w, q_x, q_y, q_z, v_x, ...
-struct GtSample {
-    double timestamp_s;
-    double q_w, q_x, q_y, q_z;
-};
-
-bool parse_gt_row(const std::string& line, GtSample& out) {
-    std::istringstream ss(line);
-    std::string tok;
-    double vals[8];
-    for (int i = 0; i < 8; ++i) {
-        if (!std::getline(ss, tok, ',')) return false;
-        try { vals[i] = std::stod(tok); } catch (...) { return false; }
-    }
-    out.timestamp_s = vals[0] * 1e-9;
-    out.q_w = vals[4]; out.q_x = vals[5]; out.q_y = vals[6]; out.q_z = vals[7];
-    return true;
-}
-
-std::vector<GtSample> read_gt_csv(const std::string& path) {
-    std::ifstream f(path);
-    if (!f.is_open()) {
-        std::cerr << "Error: cannot open GT CSV: " << path << '\n';
-        std::exit(EXIT_FAILURE);
-    }
-    std::string line;
-    std::getline(f, line);  // skip header
-    std::vector<GtSample> samples;
-    int skipped = 0;
-    while (std::getline(f, line)) {
-        if (line.empty() || line[0] == '#') continue;
-        GtSample s;
-        if (parse_gt_row(line, s)) samples.push_back(s);
-        else ++skipped;
-    }
-    if (skipped > 0)
-        std::cerr << "Warning: " << skipped << " GT rows skipped (unparseable)\n";
-    return samples;
-}
-
-Eigen::Matrix3d gt_rotation(const GtSample& s) {
-    const double norm = std::sqrt(
-        s.q_w*s.q_w + s.q_x*s.q_x + s.q_y*s.q_y + s.q_z*s.q_z);
-    const Eigen::Quaterniond q(s.q_w/norm, s.q_x/norm, s.q_y/norm, s.q_z/norm);
-    return q.toRotationMatrix();
-}
-
-// Nearest-neighbor timestamp lookup (samples sorted ascending, early exit).
-const GtSample& nearest_gt(double ts, const std::vector<GtSample>& samples) {
-    std::size_t best = 0;
-    double best_dt = std::abs(samples[0].timestamp_s - ts);
-    for (std::size_t i = 1; i < samples.size(); ++i) {
-        const double dt = std::abs(samples[i].timestamp_s - ts);
-        if (dt < best_dt) { best_dt = dt; best = i; }
-        if (samples[i].timestamp_s >= ts) break;
-    }
-    return samples[best];
-}
 
 }  // namespace
 
@@ -157,34 +82,23 @@ int main(int argc, char* argv[]) {
         }
     }
 
-    // Load IMU samples into memory.
-    std::ifstream imu_file(argv[1]);
-    if (!imu_file.is_open()) {
-        std::cerr << "Error: cannot open IMU CSV: " << argv[1] << '\n';
+    // Load IMU and GT samples into memory.
+    std::vector<slam_core::imu::ImuMeasurement>   imu_data;
+    std::vector<slam_core::io::EurocGtSample>     gt_data;
+    int imu_skipped = 0, gt_skipped = 0;
+    try {
+        imu_data = slam_core::io::read_euroc_imu_csv(argv[1], &imu_skipped);
+        gt_data  = slam_core::io::read_euroc_gt_csv(argv[2], &gt_skipped);
+    } catch (const std::exception& e) {
+        std::cerr << "Error: " << e.what() << '\n';
         return EXIT_FAILURE;
-    }
-    std::string line;
-    std::getline(imu_file, line);  // skip header
-
-    std::vector<slam_core::imu::ImuMeasurement> imu_data;
-    int imu_skipped = 0;
-    while (std::getline(imu_file, line)) {
-        if (line.empty() || line[0] == '#') continue;
-        slam_core::imu::ImuMeasurement m;
-        if (parse_imu_row(line, m)) imu_data.push_back(m);
-        else ++imu_skipped;
     }
     if (imu_skipped > 0)
         std::cerr << "Warning: " << imu_skipped << " IMU rows skipped (unparseable)\n";
+    if (gt_skipped > 0)
+        std::cerr << "Warning: " << gt_skipped << " GT rows skipped (unparseable)\n";
     if (imu_data.size() < 2) {
         std::cerr << "Error: too few IMU samples\n";
-        return EXIT_FAILURE;
-    }
-
-    // Load GT samples.
-    const std::vector<GtSample> gt_data = read_gt_csv(argv[2]);
-    if (gt_data.empty()) {
-        std::cerr << "Error: GT CSV is empty\n";
         return EXIT_FAILURE;
     }
     const double gt_start = gt_data.front().timestamp_s;
@@ -244,8 +158,8 @@ int main(int argc, char* argv[]) {
         if (dt <= 0.0) { window_start_t += window_duration; continue; }
 
         // GT relative rotation: R_B0_B1_gt = R_W_B0.T * R_W_B1.
-        const Eigen::Matrix3d R_W_B0  = gt_rotation(nearest_gt(t0, gt_data));
-        const Eigen::Matrix3d R_W_B1  = gt_rotation(nearest_gt(t1, gt_data));
+        const Eigen::Matrix3d R_W_B0  = slam_core::io::nearest_gt(t0, gt_data).R_W_B();
+        const Eigen::Matrix3d R_W_B1  = slam_core::io::nearest_gt(t1, gt_data).R_W_B();
         const Eigen::Matrix3d R_rel_gt = R_W_B0.transpose() * R_W_B1;
 
         // IMU relative rotation: integrate raw gyro starting from Identity.
@@ -268,8 +182,8 @@ int main(int argc, char* argv[]) {
         const double          error_deg     = log_err.norm() * (180.0 / kPi);
 
         // Nearest GT timestamps actually used for this window.
-        const double gt_t0 = nearest_gt(t0, gt_data).timestamp_s;
-        const double gt_t1 = nearest_gt(t1, gt_data).timestamp_s;
+        const double gt_t0 = slam_core::io::nearest_gt(t0, gt_data).timestamp_s;
+        const double gt_t1 = slam_core::io::nearest_gt(t1, gt_data).timestamp_s;
 
         out_file << t0 << ',' << t1 << ',' << dt << ',' << integrated_dt
                  << ',' << bias_est.x()
