@@ -13,10 +13,12 @@
 
 ## Current stack
 
-- CMake, C++17, Eigen, GoogleTest via FetchContent
-- Python tooling with `uv`
+- CMake (>= 3.24), C++17, Eigen (3.4–5.x), GoogleTest via FetchContent
+- Python tooling with `uv`; pytest for loader tests
 - Rerun for debug visualization
 - EuRoC MAV as the primary benchmark dataset
+- Apache-2.0 license; GitHub Actions CI (macOS + Ubuntu: build with
+  warnings-as-errors, ctest, pytest, pinned clang-format check)
 
 ## Current implemented foundation
 
@@ -27,24 +29,16 @@
 
 ### Conventions
 
-```
-T_A_B maps points from frame B into frame A
-p_A = T_A_B.apply(p_B);  T_A_C = T_A_B.compose(T_B_C);  T_B_A = T_A_B.inverse()
-
-R_W_B: rotation mapping body frame B into world frame W
-gravity_W = [0, 0, -9.81] m/s²  (−Z in world frame)
-Gyro: rad/s body frame.  Accel: m/s² body frame.  Timestamps: float64 seconds.
-Bias sign convention: omega_meas = omega_true + bias;  accel_meas = accel_true + bias
-
-EuRoC GT quaternion: Hamilton convention, w scalar first, interpreted as q_W_B.
-  Eigen::Quaterniond(q_w, q_x, q_y, q_z).toRotationMatrix() → R_W_B
-```
+All frame/unit/timestamp/rotation conventions live in
+[architecture.md](architecture.md). The load-bearing ones: `T_A_B` maps B
+into A; `R_W_B` body-to-world; `gravity_W = [0, 0, -9.81]` m/s²; float64
+seconds; `omega_meas = omega_true + bias`; EuRoC GT quaternion is Hamilton
+w-first `q_W_B`; error-state ordering is Forster `[δθ, δv, δp]` + biases.
 
 ### IMU (`src/imu/`)
 
 - `ImuMeasurement` — `timestamp_s`, `gyro_radps`, `accel_mps2`; `is_finite`, `has_strictly_increasing_timestamp`
-- `propagate_gyro(R_W_B, gyro_radps, dt_s)` — `R_W_B_next = R_W_B * exp_so3(gyro_radps * dt_s)`; throws on non-positive or non-finite `dt_s`
-- `propagate_gyro_bias_corrected(R_W_B, gyro_radps, gyro_bias_radps, dt_s)` — subtracts bias before integrating
+- `propagate_gyro(R_W_B, gyro_radps, dt_s, gyro_bias_radps = 0)` — `R_W_B_next = R_W_B * exp_so3((gyro_radps - gyro_bias_radps) * dt_s)`; zero default bias is the raw case; throws on non-positive or non-finite `dt_s`
 - `ImuState` — `timestamp_s`, `R_W_B`, `p_W_B`, `v_W_B`, `gyro_bias_radps`, `accel_bias_mps2`
 - `propagate_imu_state(state, meas, gravity_W, dt_s)` — bias-corrected gyro and accel; accel rotated to world frame and gravity-compensated; biases carried forward unchanged
 
@@ -57,7 +51,12 @@ EuRoC GT quaternion: Hamilton convention, w scalar first, interpreted as q_W_B.
 - All functions throw `std::invalid_argument` on non-finite values, non-positive dt, non-increasing timestamps, or too few measurements
 - Covariance, Jacobians, residuals, and optimizer integration are future work
 
-**Current test count: 71/71 passing.**
+### EuRoC CSV IO (`src/io/`)
+
+- `read_euroc_imu_csv`, `read_euroc_gt_csv` (`EurocGtSample`: `p_W_B`, normalized `q_W_B`, `v_W_B`, `R_W_B()`), binary-search `nearest_gt`
+- Shared by all four tools; errors via exceptions; skipped-row counts surfaced to callers
+
+**Current test count: 113/113 C++ (ctest), 6/6 Python (pytest).**
 
 ## EuRoC / tooling status
 
@@ -76,7 +75,9 @@ EuRoC GT quaternion: Hamilton convention, w scalar first, interpreted as q_W_B.
 
 ### Visualization / plotting (`scripts/`)
 
-Rerun scripts (`scripts/rerun/`): `rerun_euroc_debug.py` (stereo + raw IMU), `rerun_euroc_gyro_propagation.py` (gyro vs GT orientation), `rerun_euroc_gyro_bias_comparison.py` (raw vs corrected gyro, two 3D panels), `rerun_euroc_gyro_bias_eval.py` (per-window gyro bias scalars), `rerun_euroc_imu_state_propagation.py` (IMU state trajectories + GT error), `rerun_euroc_imu_state_bias_comparison.py` (raw vs corrected IMU state error dashboard).
+Shared helpers live in `slam_core_tools.viz` (palettes, GT indexing, CSV loading, Rerun logging).
+
+Rerun scripts (`scripts/rerun/`): `rerun_euroc_debug.py` (stereo + raw IMU), `rerun_euroc_gyro_propagation.py` (gyro vs GT orientation; N CSVs with `--labels` for raw-vs-corrected comparison), `rerun_euroc_gyro_bias_eval.py` (per-window gyro bias scalars), `rerun_euroc_imu_state_propagation.py` (IMU state trajectories + GT error; N CSVs with `--labels` for comparison dashboards).
 
 Matplotlib scripts (`scripts/plots/`): `plot_gyro_bias_impact.py` (orientation drift comparison), `plot_accel_bias_eval.py` (accel bias components + velocity error).
 
@@ -109,13 +110,13 @@ ctest --test-dir build --output-on-failure
 uv run python scripts/rerun/rerun_euroc_debug.py configs/datasets/euroc_mh01.yaml \
   --dataset-root "$HOME/datasets" --max-frames 300 --image-stride 2 --imu-stride 2
 
-# Gyro propagation
+# Gyro propagation vs GT (add a second CSV + --labels for raw-vs-corrected)
 ./build/tools/export_gyro_propagation \
   "$HOME/datasets/euroc/MH_01_easy/mav0/imu0/data.csv" \
   results/imu/MH_01_easy_gyro_orientations.csv
 uv run python scripts/rerun/rerun_euroc_gyro_propagation.py \
   configs/datasets/euroc_mh01.yaml results/imu/MH_01_easy_gyro_orientations.csv \
-  --dataset-root "$HOME/datasets" --imu-stride 1 --frame-stride 5 --max-duration-s 30
+  --dataset-root "$HOME/datasets" --frame-stride 5 --max-duration-s 30
 
 # IMU state propagation vs GT
 ./build/tools/export_imu_state_propagation \
@@ -127,16 +128,17 @@ uv run python scripts/rerun/rerun_euroc_imu_state_propagation.py \
   --frame-stride 50 --max-duration-s 30 \
   --output results/rerun/MH_01_easy_imu_state_vs_gt.rrd
 
-# Offline bias-corrected IMU state comparison
+# Offline bias-corrected IMU state comparison (same script, two CSVs)
 ./build/tools/export_imu_state_propagation \
   "$HOME/datasets/euroc/MH_01_easy/mav0/imu0/data.csv" \
   results/imu/MH_01_easy_imu_state_bias_corrected.csv \
   --init-from-gt \
   --gyro-bias -0.00332713 0.0212966 0.0780824 \
   --accel-bias -0.027562 0.137274 0.076698
-uv run python scripts/rerun/rerun_euroc_imu_state_bias_comparison.py \
+uv run python scripts/rerun/rerun_euroc_imu_state_propagation.py \
   results/imu/MH_01_easy_imu_state.csv \
   results/imu/MH_01_easy_imu_state_bias_corrected.csv \
+  --labels raw bias_corrected \
   --config configs/datasets/euroc_mh01.yaml --dataset-root "$HOME/datasets" \
   --max-duration-s 180 \
   --output results/rerun/MH_01_easy_imu_state_bias_comparison.rrd
@@ -150,12 +152,12 @@ uv run python scripts/rerun/rerun_euroc_imu_state_bias_comparison.py \
 
 ## Next direction
 
-IMU propagation, offline bias diagnostics, and IMU preintegration foundation are complete. The next focus is gravity-aligned initialization and visual constraints:
+IMU propagation, offline bias diagnostics, the preintegration foundation, gravity-aligned stationary initialization, and the undistorted pinhole camera model are complete. Repo hardening (license, CI, shared IO, shared viz helpers) landed 2026-07. The next focus is the factor-graph backbone:
 
-1. **Gravity-aligned initialization without GT** — estimate initial `R_W_B` from a short stationary IMU segment by using accelerometer measurements to infer the gravity direction; removes the current dependency on EuRoC ground truth for orientation initialization before IMU propagation; input: short stationary measurement sequence; output: `R_W_B` aligning measured body-frame gravity with `gravity_W = [0, 0, -9.81]`
-2. **Camera models** — projection, distortion, reprojection error
-3. **Feature detection and tracking**
-4. **Visual-inertial factor graph** — reprojection + IMU preintegration factors
+1. **Factor-graph foundation** — on-manifold state blocks and a small Levenberg–Marquardt optimizer over Eigen; SO(3) right Jacobians; numeric-vs-analytic Jacobian test harness
+2. **Preintegration covariance + bias Jacobians** — extend `PreintegratedImu` for use as an IMU factor
+3. **IMU + prior + reprojection factors** — validated on EuRoC with GT priors and synthetic landmark tracks before any frontend exists
+4. **Feature detection and tracking**, then sliding-window VIO
 
 ## Project state update rule
 
