@@ -41,16 +41,12 @@ from slam_core_tools.datasets.euroc import (
     resolve_sequence_root,
     validate_imu,
 )
+from slam_core_tools.viz import set_time_since
 
 
 # ---------------------------------------------------------------------------
 # Rerun logging
 # ---------------------------------------------------------------------------
-
-def set_rerun_time(t_s: float, start_s: float) -> None:
-    t_rel_s = t_s - start_s
-    rr.set_time("time", duration=t_rel_s)
-
 
 def log_imu(samples: list[ImuSample], start_s: float) -> None:
     for i, s in enumerate(samples):
@@ -63,7 +59,7 @@ def log_imu(samples: list[ImuSample], start_s: float) -> None:
             print(f"  [imu_derived sample 0]  gyro_norm={gyro_norm:.4f} rad/s"
                   f"  accel_norm={accel_norm:.4f} m/s²"
                   f"  norm_minus_g={accel_norm_minus_g:.4f} m/s²")
-        set_rerun_time(s.timestamp_s, start_s)
+        set_time_since(s.timestamp_s, start_s)
         rr.log("imu/gyro/x",                                 rr.Scalars(gx))
         rr.log("imu/gyro/y",                                 rr.Scalars(gy))
         rr.log("imu/gyro/z",                                 rr.Scalars(gz))
@@ -95,7 +91,7 @@ def log_stereo_images(
         img1 = cv2.imread(str(cam1_dir / pair.filename_cam1), cv2.IMREAD_GRAYSCALE)
         if img0 is None or img1 is None:
             continue
-        set_rerun_time(pair.timestamp_s, start_s)
+        set_time_since(pair.timestamp_s, start_s)
         rr.log("camera/cam0", rr.Image(img0))
         rr.log("camera/cam1", rr.Image(img1))
         if t_first is None:

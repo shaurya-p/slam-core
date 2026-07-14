@@ -14,38 +14,22 @@ Usage:
 """
 
 import argparse
-import csv
 import statistics
 import sys
 from pathlib import Path
 
 import matplotlib.pyplot as plt
 
-_EXPECTED_COLS = {
+from slam_core_tools.viz import load_csv_rows
+
+_EXPECTED_COLS = frozenset({
     "timestamp_start_s",
     "accel_bias_est_x_mps2",
     "accel_bias_est_y_mps2",
     "accel_bias_est_z_mps2",
     "accel_bias_est_norm_mps2",
     "velocity_error_norm_mps",
-}
-
-
-def _load_csv(csv_path: Path) -> list[dict]:
-    if not csv_path.exists():
-        raise FileNotFoundError(f"CSV not found: {csv_path}")
-    rows: list[dict] = []
-    with open(csv_path) as f:
-        reader = csv.DictReader(f)
-        if reader.fieldnames is None or not _EXPECTED_COLS.issubset(set(reader.fieldnames)):
-            raise ValueError(
-                f"CSV missing required columns.\n"
-                f"Expected subset: {sorted(_EXPECTED_COLS)}\n"
-                f"Got: {reader.fieldnames}"
-            )
-        for row in reader:
-            rows.append({k: float(v) for k, v in row.items()})
-    return rows
+})
 
 
 def _make_plot(
@@ -129,7 +113,7 @@ def main() -> None:
 
     csv_path = Path(args.csv)
     try:
-        rows = _load_csv(csv_path)
+        rows = load_csv_rows(csv_path, _EXPECTED_COLS, "Accel bias eval")
     except (FileNotFoundError, ValueError) as e:
         sys.exit(f"Error: {e}")
 

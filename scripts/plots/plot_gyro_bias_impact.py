@@ -3,7 +3,8 @@ Plot gyro bias correction impact on orientation drift.
 
 Compares raw vs bias-corrected gyro-only propagation against EuRoC GT.
 
-Error convention — identical to scripts/rerun/rerun_euroc_gyro_propagation.py:
+Error convention — identical to scripts/rerun/rerun_euroc_gyro_propagation.py
+(shared helpers in slam_core_tools.viz):
   R_est_ref = estimated rotation at t0 (first raw CSV row)
   R_gt_ref  = nearest GT rotation at t0
 
@@ -25,97 +26,19 @@ Usage:
 """
 
 import argparse
-import bisect
-import csv
-import math
 import sys
 from pathlib import Path
 
 import matplotlib.pyplot as plt
 import numpy as np
 
-from slam_core_tools.datasets.euroc import (
-    GroundTruthSample,
-    load_config,
-    read_groundtruth_csv,
-    resolve_sequence_root,
+from slam_core_tools.viz import (
+    build_gt_index,
+    geodesic_deg,
+    load_orientation_csv,
+    load_sequence_gt,
+    nearest_by_index,
 )
-
-_EXPECTED_COLS = {
-    "timestamp_s", "r00", "r01", "r02",
-    "r10", "r11", "r12",
-    "r20", "r21", "r22",
-}
-
-
-# ---------------------------------------------------------------------------
-# Geometry helpers — kept identical to rerun_euroc_gyro_propagation.py
-# ---------------------------------------------------------------------------
-
-def quat_to_mat(w: float, x: float, y: float, z: float) -> np.ndarray:
-    return np.array([
-        [1 - 2*(y*y + z*z),  2*(x*y - w*z),     2*(x*z + w*y)],
-        [2*(x*y + w*z),      1 - 2*(x*x + z*z),  2*(y*z - w*x)],
-        [2*(x*z - w*y),      2*(y*z + w*x),       1 - 2*(x*x + y*y)],
-    ])
-
-
-def build_gt_index(
-    samples: list[GroundTruthSample],
-) -> tuple[list[float], list[np.ndarray]]:
-    times: list[float] = []
-    mats: list[np.ndarray] = []
-    for s in samples:
-        norm = math.sqrt(s.q_w**2 + s.q_x**2 + s.q_y**2 + s.q_z**2)
-        if norm < 1e-10:
-            continue
-        w, x, y, z = s.q_w/norm, s.q_x/norm, s.q_y/norm, s.q_z/norm
-        times.append(s.timestamp_s)
-        mats.append(quat_to_mat(w, x, y, z))
-    return times, mats
-
-
-def nearest_gt_mat(
-    ts: float,
-    gt_times: list[float],
-    gt_mats: list[np.ndarray],
-) -> np.ndarray:
-    idx = bisect.bisect_left(gt_times, ts)
-    if idx == 0:
-        return gt_mats[0]
-    if idx == len(gt_times):
-        return gt_mats[-1]
-    if ts - gt_times[idx - 1] <= gt_times[idx] - ts:
-        return gt_mats[idx - 1]
-    return gt_mats[idx]
-
-
-def geodesic_deg(R_err: np.ndarray) -> float:
-    cos_angle = (np.trace(R_err) - 1.0) / 2.0
-    return math.acos(max(-1.0, min(1.0, float(cos_angle)))) * 180.0 / math.pi
-
-
-# ---------------------------------------------------------------------------
-# CSV loading
-# ---------------------------------------------------------------------------
-
-def load_orientations(csv_path: Path) -> list[tuple[float, list[float]]]:
-    if not csv_path.exists():
-        raise FileNotFoundError(f"Orientation CSV not found: {csv_path}")
-    rows: list[tuple[float, list[float]]] = []
-    with open(csv_path) as f:
-        reader = csv.DictReader(f)
-        if reader.fieldnames is None or not _EXPECTED_COLS.issubset(set(reader.fieldnames)):
-            raise ValueError(
-                f"Orientation CSV missing required columns.\n"
-                f"Expected: {sorted(_EXPECTED_COLS)}\n"
-                f"Got: {reader.fieldnames}"
-            )
-        for row in reader:
-            ts  = float(row["timestamp_s"])
-            mat = [float(row[f"r{r}{c}"]) for r in range(3) for c in range(3)]
-            rows.append((ts, mat))
-    return rows
 
 
 # ---------------------------------------------------------------------------
@@ -123,7 +46,7 @@ def load_orientations(csv_path: Path) -> list[tuple[float, list[float]]]:
 # ---------------------------------------------------------------------------
 
 def compute_error_series(
-    rows: list[tuple[float, list[float]]],
+    rows: list[tuple[float, np.ndarray]],
     start_s: float,
     max_duration_s: float | None,
     gt_times: list[float],
@@ -137,8 +60,8 @@ def compute_error_series(
         t_rel = ts - start_s
         if max_duration_s is not None and t_rel > max_duration_s:
             break
-        R_est     = np.array(mat).reshape(3, 3)
-        R_gt      = nearest_gt_mat(ts, gt_times, gt_mats)
+        R_est     = mat
+        R_gt      = nearest_by_index(ts, gt_mats, gt_times)
         R_est_rel = R_est_ref.T @ R_est
         R_gt_rel  = R_gt_ref.T  @ R_gt
         R_err     = R_gt_rel.T  @ R_est_rel
@@ -229,22 +152,12 @@ def main() -> None:
                         help="Truncate both series at this relative time (default: full)")
     args = parser.parse_args()
 
-    try:
-        cfg      = load_config(Path(args.config))
-        seq_root = resolve_sequence_root(args.dataset_root, cfg)
-    except (FileNotFoundError, ValueError) as e:
-        sys.exit(f"Error: {e}")
-
-    gt_csv = seq_root / "mav0/state_groundtruth_estimate0/data.csv"
-    try:
-        gt_samples = read_groundtruth_csv(gt_csv)
-    except FileNotFoundError:
-        sys.exit(f"Error: GT CSV not found: {gt_csv}")
+    _, _, gt_samples = load_sequence_gt(Path(args.config), args.dataset_root)
     gt_times, gt_mats = build_gt_index(gt_samples)
 
     try:
-        raw_rows  = load_orientations(Path(args.raw_csv))
-        corr_rows = load_orientations(Path(args.corrected_csv))
+        raw_rows  = load_orientation_csv(Path(args.raw_csv))
+        corr_rows = load_orientation_csv(Path(args.corrected_csv))
     except (FileNotFoundError, ValueError) as e:
         sys.exit(f"Error: {e}")
 
@@ -252,9 +165,8 @@ def main() -> None:
         sys.exit("Error: one or both orientation CSVs are empty")
 
     # Both series share the reference pair from the first raw row.
-    first_ts, first_mat = raw_rows[0]
-    R_est_ref = np.array(first_mat).reshape(3, 3)
-    R_gt_ref  = nearest_gt_mat(first_ts, gt_times, gt_mats)
+    first_ts, R_est_ref = raw_rows[0]
+    R_gt_ref  = nearest_by_index(first_ts, gt_mats, gt_times)
     start_s   = first_ts
 
     max_dur = args.max_duration_s
