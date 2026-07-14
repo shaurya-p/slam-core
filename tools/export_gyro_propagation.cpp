@@ -124,10 +124,8 @@ int main(int argc, char* argv[]) {
         }
 
         // Zeroth-order hold: apply prev.gyro over [prev.timestamp_s, curr.timestamp_s].
-        R_W_B = use_bias_correction
-                    ? slam_core::imu::propagate_gyro_bias_corrected(
-                          R_W_B, prev.gyro_radps, gyro_bias, dt_s)
-                    : slam_core::imu::propagate_gyro(R_W_B, prev.gyro_radps, dt_s);
+        R_W_B = slam_core::imu::propagate_gyro(
+            R_W_B, prev.gyro_radps, dt_s, gyro_bias);
         write_row(out_file, curr.timestamp_s, R_W_B);
         ++written;
     }
