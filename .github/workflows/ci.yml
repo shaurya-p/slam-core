@@ -1,0 +1,49 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  build-and-test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Eigen (Ubuntu)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libeigen3-dev
+
+      - name: Install Eigen (macOS)
+        if: runner.os == 'macOS'
+        run: brew install eigen
+
+      - name: Configure
+        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_COMPILE_WARNING_AS_ERROR=ON
+
+      - name: Build
+        run: cmake --build build -j 4
+
+      - name: C++ tests
+        run: ctest --test-dir build --output-on-failure
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+
+      - name: Python tests
+        run: uv run pytest -q
+
+  format-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+      - name: clang-format check
+        run: |
+          git ls-files '*.cpp' '*.hpp' | xargs uvx clang-format@19.1.7 --dry-run -Werror

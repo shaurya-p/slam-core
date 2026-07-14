@@ -3,8 +3,8 @@
 #include <Eigen/Geometry>
 #include <cmath>
 
-#include "slam_core/geometry/so3.hpp"
 #include "slam_core/geometry/se3.hpp"
+#include "slam_core/geometry/so3.hpp"
 
 using namespace slam_core::geometry;
 
@@ -25,10 +25,8 @@ TEST(SO3Exp, NearZero) {
 
 TEST(SO3Exp, Known90DegZ) {
     const Eigen::Vector3d w{0.0, 0.0, M_PI / 2.0};
-    Eigen::Matrix3d expected;
-    expected << 0, -1, 0,
-                1,  0, 0,
-                0,  0, 1;
+    Eigen::Matrix3d       expected;
+    expected << 0, -1, 0, 1, 0, 0, 0, 0, 1;
     EXPECT_TRUE(exp_so3(w).isApprox(expected, 1e-9));
 }
 
@@ -53,9 +51,8 @@ TEST(SO3Validity, AcceptsValid) {
 TEST(SO3Validity, RejectsInvalid) {
     EXPECT_FALSE(is_valid_rotation(2.0 * Eigen::Matrix3d::Identity()));
     Eigen::Matrix3d row_swap;
-    row_swap << 0, 1, 0,
-                1, 0, 0,  // det = -1
-                0, 0, 1;
+    row_swap << 0, 1, 0, 1, 0, 0,  // det = -1
+        0, 0, 1;
     EXPECT_FALSE(is_valid_rotation(row_swap));
 }
 
@@ -89,15 +86,15 @@ TEST(SE3, ComposeApply) {
 // --- SO(3) log near pi ---
 
 TEST(SO3Log, NearPiX) {
-    const double theta = M_PI - 1e-6;
-    const Eigen::Vector3d w = theta * Eigen::Vector3d{1.0, 0.0, 0.0};
+    const double          theta = M_PI - 1e-6;
+    const Eigen::Vector3d w     = theta * Eigen::Vector3d{1.0, 0.0, 0.0};
     EXPECT_TRUE(log_so3(exp_so3(w)).isApprox(w, 1e-9));
 }
 
 TEST(SO3Log, NearPiGeneral) {
-    const double theta = M_PI - 1e-6;
-    const Eigen::Vector3d axis = Eigen::Vector3d{1.0, 1.0, 1.0}.normalized();
-    const Eigen::Vector3d w = theta * axis;
+    const double          theta = M_PI - 1e-6;
+    const Eigen::Vector3d axis  = Eigen::Vector3d{1.0, 1.0, 1.0}.normalized();
+    const Eigen::Vector3d w     = theta * axis;
     EXPECT_TRUE(log_so3(exp_so3(w)).isApprox(w, 1e-9));
 }
 

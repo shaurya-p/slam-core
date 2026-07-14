@@ -39,10 +39,9 @@ struct ImuState {
 // Throws std::invalid_argument if:
 //   - dt_s is not positive and finite
 //   - any field of state, measurement, or gravity_W is not finite
-ImuState propagate_imu_state(
-    const ImuState&        state,
-    const ImuMeasurement&  measurement,
-    const Eigen::Vector3d& gravity_W,
-    double                 dt_s);
+ImuState propagate_imu_state(const ImuState&        state,
+                             const ImuMeasurement&  measurement,
+                             const Eigen::Vector3d& gravity_W,
+                             double                 dt_s);
 
 }  // namespace slam_core::imu

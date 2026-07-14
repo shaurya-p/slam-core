@@ -8,27 +8,21 @@
 
 namespace slam_core::imu {
 
-Eigen::Matrix3d estimate_R_W_B_from_stationary(
-    const std::vector<ImuMeasurement>& measurements,
-    const Eigen::Vector3d&             gravity_W)
-{
+Eigen::Matrix3d estimate_R_W_B_from_stationary(const std::vector<ImuMeasurement>& measurements,
+                                               const Eigen::Vector3d&             gravity_W) {
     if (measurements.size() < 2) {
-        throw std::invalid_argument(
-            "estimate_R_W_B_from_stationary: need at least 2 measurements");
+        throw std::invalid_argument("estimate_R_W_B_from_stationary: need at least 2 measurements");
     }
     for (const auto& m : measurements) {
         if (!is_finite(m)) {
-            throw std::invalid_argument(
-                "estimate_R_W_B_from_stationary: non-finite measurement");
+            throw std::invalid_argument("estimate_R_W_B_from_stationary: non-finite measurement");
         }
     }
     if (!gravity_W.allFinite()) {
-        throw std::invalid_argument(
-            "estimate_R_W_B_from_stationary: gravity_W is non-finite");
+        throw std::invalid_argument("estimate_R_W_B_from_stationary: gravity_W is non-finite");
     }
     if (gravity_W.norm() < 1e-6) {
-        throw std::invalid_argument(
-            "estimate_R_W_B_from_stationary: gravity_W is near-zero");
+        throw std::invalid_argument("estimate_R_W_B_from_stationary: gravity_W is near-zero");
     }
 
     Eigen::Vector3d accel_sum = Eigen::Vector3d::Zero();
@@ -70,11 +64,11 @@ Eigen::Matrix3d estimate_R_W_B_from_stationary(
             ref = Eigen::Vector3d::UnitZ();
         }
         const Eigen::Vector3d axis = (ref - a * a.dot(ref)).normalized();
-        R = 2.0 * axis * axis.transpose() - Eigen::Matrix3d::Identity();
+        R                          = 2.0 * axis * axis.transpose() - Eigen::Matrix3d::Identity();
     } else {
         // Shortest-arc Rodrigues: R = I + [v]× + [v]×² / (1 + c)
         const Eigen::Matrix3d vx = geometry::skew(v);
-        R = Eigen::Matrix3d::Identity() + vx + vx * vx / (1.0 + c);
+        R                        = Eigen::Matrix3d::Identity() + vx + vx * vx / (1.0 + c);
     }
 
     if (!geometry::is_valid_rotation(R)) {

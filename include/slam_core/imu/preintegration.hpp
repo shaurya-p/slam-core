@@ -34,12 +34,11 @@ struct PreintegratedImu {
 // Throws std::invalid_argument if:
 //   - dt_s is not positive and finite
 //   - measurement, gyro_bias_radps, or accel_bias_mps2 contain non-finite values
-void integrate(
-    PreintegratedImu&      preint,
-    const ImuMeasurement&  measurement,
-    const Eigen::Vector3d& gyro_bias_radps,
-    const Eigen::Vector3d& accel_bias_mps2,
-    double                 dt_s);
+void integrate(PreintegratedImu&      preint,
+               const ImuMeasurement&  measurement,
+               const Eigen::Vector3d& gyro_bias_radps,
+               const Eigen::Vector3d& accel_bias_mps2,
+               double                 dt_s);
 
 // Integrate a contiguous sequence of timestamped IMU measurements into a fresh
 // PreintegratedImu. dt for each step is derived from adjacent timestamps.
@@ -50,10 +49,9 @@ void integrate(
 //   - any measurement contains non-finite values
 //   - gyro_bias_radps or accel_bias_mps2 contain non-finite values
 //   - any adjacent dt is not positive and finite (non-increasing timestamps)
-PreintegratedImu integrate_sequence(
-    const std::vector<ImuMeasurement>& measurements,
-    const Eigen::Vector3d&             gyro_bias_radps,
-    const Eigen::Vector3d&             accel_bias_mps2);
+PreintegratedImu integrate_sequence(const std::vector<ImuMeasurement>& measurements,
+                                    const Eigen::Vector3d&             gyro_bias_radps,
+                                    const Eigen::Vector3d&             accel_bias_mps2);
 
 // Integrate all measurements from stream whose timestamps fall within
 // [t_start_s, t_end_s] (inclusive on both ends).
@@ -71,11 +69,10 @@ PreintegratedImu integrate_sequence(
 //   - any measurement in stream contains non-finite values
 //   - stream timestamps are not strictly increasing
 //   - fewer than 2 measurements fall within [t_start_s, t_end_s]
-PreintegratedImu integrate_window(
-    const std::vector<ImuMeasurement>& stream,
-    double                             t_start_s,
-    double                             t_end_s,
-    const Eigen::Vector3d&             gyro_bias_radps,
-    const Eigen::Vector3d&             accel_bias_mps2);
+PreintegratedImu integrate_window(const std::vector<ImuMeasurement>& stream,
+                                  double                             t_start_s,
+                                  double                             t_end_s,
+                                  const Eigen::Vector3d&             gyro_bias_radps,
+                                  const Eigen::Vector3d&             accel_bias_mps2);
 
 }  // namespace slam_core::imu

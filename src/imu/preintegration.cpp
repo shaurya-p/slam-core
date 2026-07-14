@@ -15,44 +15,36 @@ void PreintegratedImu::reset() {
     delta_t_s = 0.0;
 }
 
-void integrate(
-    PreintegratedImu&      preint,
-    const ImuMeasurement&  measurement,
-    const Eigen::Vector3d& gyro_bias_radps,
-    const Eigen::Vector3d& accel_bias_mps2,
-    double                 dt_s)
-{
+void integrate(PreintegratedImu&      preint,
+               const ImuMeasurement&  measurement,
+               const Eigen::Vector3d& gyro_bias_radps,
+               const Eigen::Vector3d& accel_bias_mps2,
+               double                 dt_s) {
     if (!std::isfinite(dt_s) || dt_s <= 0.0) {
-        throw std::invalid_argument(
-            "integrate: dt_s must be positive and finite");
+        throw std::invalid_argument("integrate: dt_s must be positive and finite");
     }
     if (!is_finite(measurement)) {
-        throw std::invalid_argument(
-            "integrate: measurement contains non-finite values");
+        throw std::invalid_argument("integrate: measurement contains non-finite values");
     }
     if (!gyro_bias_radps.allFinite()) {
-        throw std::invalid_argument(
-            "integrate: gyro_bias_radps contains non-finite values");
+        throw std::invalid_argument("integrate: gyro_bias_radps contains non-finite values");
     }
     if (!accel_bias_mps2.allFinite()) {
-        throw std::invalid_argument(
-            "integrate: accel_bias_mps2 contains non-finite values");
+        throw std::invalid_argument("integrate: accel_bias_mps2 contains non-finite values");
     }
 
     const Eigen::Vector3d omega = measurement.gyro_radps - gyro_bias_radps;
     const Eigen::Vector3d a     = measurement.accel_mps2 - accel_bias_mps2;
 
-    preint.delta_p  += preint.delta_v * dt_s + 0.5 * (preint.delta_R * a) * dt_s * dt_s;
-    preint.delta_v  += preint.delta_R * a * dt_s;
-    preint.delta_R   = preint.delta_R * slam_core::geometry::exp_so3(omega * dt_s);
+    preint.delta_p += preint.delta_v * dt_s + 0.5 * (preint.delta_R * a) * dt_s * dt_s;
+    preint.delta_v += preint.delta_R * a * dt_s;
+    preint.delta_R = preint.delta_R * slam_core::geometry::exp_so3(omega * dt_s);
     preint.delta_t_s += dt_s;
 }
 
-PreintegratedImu integrate_sequence(
-    const std::vector<ImuMeasurement>& measurements,
-    const Eigen::Vector3d&             gyro_bias_radps,
-    const Eigen::Vector3d&             accel_bias_mps2)
-{
+PreintegratedImu integrate_sequence(const std::vector<ImuMeasurement>& measurements,
+                                    const Eigen::Vector3d&             gyro_bias_radps,
+                                    const Eigen::Vector3d&             accel_bias_mps2) {
     if (measurements.size() < 2) {
         throw std::invalid_argument(
             "integrate_sequence: need at least 2 measurements to form a dt");
@@ -81,32 +73,26 @@ PreintegratedImu integrate_sequence(
     return preint;
 }
 
-PreintegratedImu integrate_window(
-    const std::vector<ImuMeasurement>& stream,
-    double                             t_start_s,
-    double                             t_end_s,
-    const Eigen::Vector3d&             gyro_bias_radps,
-    const Eigen::Vector3d&             accel_bias_mps2)
-{
+PreintegratedImu integrate_window(const std::vector<ImuMeasurement>& stream,
+                                  double                             t_start_s,
+                                  double                             t_end_s,
+                                  const Eigen::Vector3d&             gyro_bias_radps,
+                                  const Eigen::Vector3d&             accel_bias_mps2) {
     if (!gyro_bias_radps.allFinite()) {
-        throw std::invalid_argument(
-            "integrate_window: gyro_bias_radps contains non-finite values");
+        throw std::invalid_argument("integrate_window: gyro_bias_radps contains non-finite values");
     }
     if (!accel_bias_mps2.allFinite()) {
-        throw std::invalid_argument(
-            "integrate_window: accel_bias_mps2 contains non-finite values");
+        throw std::invalid_argument("integrate_window: accel_bias_mps2 contains non-finite values");
     }
     if (!std::isfinite(t_start_s) || !std::isfinite(t_end_s)) {
-        throw std::invalid_argument(
-            "integrate_window: t_start_s and t_end_s must be finite");
+        throw std::invalid_argument("integrate_window: t_start_s and t_end_s must be finite");
     }
     if (t_start_s >= t_end_s) {
         throw std::invalid_argument(
             "integrate_window: t_start_s must be strictly less than t_end_s");
     }
     if (stream.empty()) {
-        throw std::invalid_argument(
-            "integrate_window: stream is empty");
+        throw std::invalid_argument("integrate_window: stream is empty");
     }
     for (const auto& m : stream) {
         if (!is_finite(m)) {

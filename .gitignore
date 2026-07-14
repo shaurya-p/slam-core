@@ -2,6 +2,7 @@
 CLAUDE.md
 .claude/
 private/
+tickets/
 
 # Python
 __pycache__/
@@ -30,9 +31,9 @@ data/
 # # Docs - for internal use
 # docs/project_state.md
 
-# Logs and outputs
+# Logs and outputs — results/ covers exported CSVs; a bare *.csv would also
+# swallow committed test fixtures and benchmark tables.
 *.log
-*.csv
 runs/
 outputs/
 results/

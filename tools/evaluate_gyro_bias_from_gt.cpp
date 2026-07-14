@@ -58,7 +58,10 @@ int main(int argc, char* argv[]) {
         " <imu_csv> <gt_csv> <output_csv>"
         " [--window-duration <sec>]\n";
 
-    if (argc < 4) { std::cerr << usage; return EXIT_FAILURE; }
+    if (argc < 4) {
+        std::cerr << usage;
+        return EXIT_FAILURE;
+    }
 
     double window_duration = 1.0;
     for (int i = 4; i < argc; ++i) {
@@ -67,8 +70,9 @@ int main(int argc, char* argv[]) {
                 std::cerr << "Error: --window-duration requires a value\n";
                 return EXIT_FAILURE;
             }
-            try { window_duration = std::stod(argv[++i]); }
-            catch (...) {
+            try {
+                window_duration = std::stod(argv[++i]);
+            } catch (...) {
                 std::cerr << "Error: invalid --window-duration value\n";
                 return EXIT_FAILURE;
             }
@@ -83,9 +87,9 @@ int main(int argc, char* argv[]) {
     }
 
     // Load IMU and GT samples into memory.
-    std::vector<slam_core::imu::ImuMeasurement>   imu_data;
-    std::vector<slam_core::io::EurocGtSample>     gt_data;
-    int imu_skipped = 0, gt_skipped = 0;
+    std::vector<slam_core::imu::ImuMeasurement> imu_data;
+    std::vector<slam_core::io::EurocGtSample>   gt_data;
+    int                                         imu_skipped = 0, gt_skipped = 0;
     try {
         imu_data = slam_core::io::read_euroc_imu_csv(argv[1], &imu_skipped);
         gt_data  = slam_core::io::read_euroc_gt_csv(argv[2], &gt_skipped);
@@ -117,23 +121,22 @@ int main(int argc, char* argv[]) {
 
     // Advance to first IMU sample inside GT coverage.
     std::size_t idx_base = 0;
-    while (idx_base < imu_data.size() &&
-           imu_data[idx_base].timestamp_s < gt_start) ++idx_base;
+    while (idx_base < imu_data.size() && imu_data[idx_base].timestamp_s < gt_start) ++idx_base;
     if (idx_base >= imu_data.size()) {
-        std::cerr << "Error: no IMU samples within GT coverage ["
-                  << gt_start << ", " << gt_end << "] s\n";
+        std::cerr << "Error: no IMU samples within GT coverage [" << gt_start << ", " << gt_end
+                  << "] s\n";
         return EXIT_FAILURE;
     }
 
     // Summary accumulators.
     std::vector<double> bias_norms;
     std::vector<double> error_angles_deg;
-    Eigen::Vector3d bias_sum            = Eigen::Vector3d::Zero();
-    double          integrated_dt_sum   = 0.0;
-    double          dt_abs_diff_sum     = 0.0;
-    double first_imu_t0 = 0.0, last_imu_t1 = 0.0;
-    double first_gt_t0  = 0.0, last_gt_t1  = 0.0;
-    int n_windows = 0;
+    Eigen::Vector3d     bias_sum          = Eigen::Vector3d::Zero();
+    double              integrated_dt_sum = 0.0;
+    double              dt_abs_diff_sum   = 0.0;
+    double              first_imu_t0 = 0.0, last_imu_t1 = 0.0;
+    double              first_gt_t0 = 0.0, last_gt_t1 = 0.0;
+    int                 n_windows = 0;
 
     double window_start_t = imu_data[idx_base].timestamp_s;
 
@@ -141,40 +144,44 @@ int main(int argc, char* argv[]) {
         const double window_end_t = window_start_t + window_duration;
 
         // Find i0: first IMU index >= window_start_t.
-        while (idx_base < imu_data.size() &&
-               imu_data[idx_base].timestamp_s < window_start_t) ++idx_base;
+        while (idx_base < imu_data.size() && imu_data[idx_base].timestamp_s < window_start_t)
+            ++idx_base;
         const std::size_t i0 = idx_base;
 
         // Find i1: last IMU index with timestamp <= window_end_t.
         std::size_t i1 = i0;
-        while (i1 + 1 < imu_data.size() &&
-               imu_data[i1 + 1].timestamp_s <= window_end_t) ++i1;
+        while (i1 + 1 < imu_data.size() && imu_data[i1 + 1].timestamp_s <= window_end_t) ++i1;
 
-        if (i1 <= i0) { window_start_t += window_duration; continue; }
+        if (i1 <= i0) {
+            window_start_t += window_duration;
+            continue;
+        }
 
         const double t0 = imu_data[i0].timestamp_s;
         const double t1 = imu_data[i1].timestamp_s;
         const double dt = t1 - t0;
-        if (dt <= 0.0) { window_start_t += window_duration; continue; }
+        if (dt <= 0.0) {
+            window_start_t += window_duration;
+            continue;
+        }
 
         // GT relative rotation: R_B0_B1_gt = R_W_B0.T * R_W_B1.
-        const Eigen::Matrix3d R_W_B0  = slam_core::io::nearest_gt(t0, gt_data).R_W_B();
-        const Eigen::Matrix3d R_W_B1  = slam_core::io::nearest_gt(t1, gt_data).R_W_B();
+        const Eigen::Matrix3d R_W_B0   = slam_core::io::nearest_gt(t0, gt_data).R_W_B();
+        const Eigen::Matrix3d R_W_B1   = slam_core::io::nearest_gt(t1, gt_data).R_W_B();
         const Eigen::Matrix3d R_rel_gt = R_W_B0.transpose() * R_W_B1;
 
         // IMU relative rotation: integrate raw gyro starting from Identity.
         Eigen::Matrix3d R_rel_imu = Eigen::Matrix3d::Identity();
         for (std::size_t i = i0; i < i1; ++i) {
-            const double dt_i =
-                imu_data[i + 1].timestamp_s - imu_data[i].timestamp_s;
-            R_rel_imu = slam_core::imu::propagate_gyro(
-                R_rel_imu, imu_data[i].gyro_radps, dt_i);
+            const double dt_i = imu_data[i + 1].timestamp_s - imu_data[i].timestamp_s;
+            R_rel_imu = slam_core::imu::propagate_gyro(R_rel_imu, imu_data[i].gyro_radps, dt_i);
         }
 
         // R_err = R_rel_imu.T * R_rel_gt
         // log_so3(R_err) / integrated_dt = rotation correction toward GT
         // gyro_bias_est = -log_so3(R_err) / integrated_dt  (omega_meas = omega_true + bias)
-        // integrated_dt = t1 - t0 = actual IMU span; bias denominator uses this, not window_duration.
+        // integrated_dt = t1 - t0 = actual IMU span; bias denominator uses this, not
+        // window_duration.
         const double          integrated_dt = dt;  // dt = t1 - t0 (actual), confirmed equal
         const Eigen::Matrix3d R_err         = R_rel_imu.transpose() * R_rel_gt;
         const Eigen::Vector3d log_err       = slam_core::geometry::log_so3(R_err);
@@ -185,16 +192,13 @@ int main(int argc, char* argv[]) {
         const double gt_t0 = slam_core::io::nearest_gt(t0, gt_data).timestamp_s;
         const double gt_t1 = slam_core::io::nearest_gt(t1, gt_data).timestamp_s;
 
-        out_file << t0 << ',' << t1 << ',' << dt << ',' << integrated_dt
-                 << ',' << bias_est.x()
-                 << ',' << bias_est.y()
-                 << ',' << bias_est.z()
-                 << ',' << bias_est.norm()
-                 << ',' << error_deg << '\n';
+        out_file << t0 << ',' << t1 << ',' << dt << ',' << integrated_dt << ',' << bias_est.x()
+                 << ',' << bias_est.y() << ',' << bias_est.z() << ',' << bias_est.norm() << ','
+                 << error_deg << '\n';
 
-        bias_sum          += bias_est;
+        bias_sum += bias_est;
         integrated_dt_sum += integrated_dt;
-        dt_abs_diff_sum   += std::abs(integrated_dt - window_duration);
+        dt_abs_diff_sum += std::abs(integrated_dt - window_duration);
         bias_norms.push_back(bias_est.norm());
         error_angles_deg.push_back(error_deg);
 
@@ -221,35 +225,30 @@ int main(int argc, char* argv[]) {
 
     std::vector<double> sorted_norms = bias_norms;
     std::sort(sorted_norms.begin(), sorted_norms.end());
-    const double median_norm =
-        sorted_norms[sorted_norms.size() / 2];
-    const double mean_norm =
-        std::accumulate(bias_norms.begin(), bias_norms.end(), 0.0) / n_windows;
+    const double median_norm = sorted_norms[sorted_norms.size() / 2];
+    const double mean_norm = std::accumulate(bias_norms.begin(), bias_norms.end(), 0.0) / n_windows;
     const double mean_err =
         std::accumulate(error_angles_deg.begin(), error_angles_deg.end(), 0.0) / n_windows;
-    const double max_err =
-        *std::max_element(error_angles_deg.begin(), error_angles_deg.end());
-    const double mean_integrated_dt  = integrated_dt_sum / n_windows;
-    const double mean_dt_abs_diff    = dt_abs_diff_sum   / n_windows;
+    const double max_err = *std::max_element(error_angles_deg.begin(), error_angles_deg.end());
+    const double mean_integrated_dt = integrated_dt_sum / n_windows;
+    const double mean_dt_abs_diff   = dt_abs_diff_sum / n_windows;
 
     std::cerr << std::setprecision(6) << std::fixed;
     std::cerr << "evaluate_gyro_bias_from_gt:\n"
               << "  windows:              " << n_windows << "\n"
-              << "  nominal window dur:   " << window_duration    << " s\n"
+              << "  nominal window dur:   " << window_duration << " s\n"
               << "  mean integrated dt:   " << mean_integrated_dt << " s\n"
-              << "  mean |dt - nominal|:  " << mean_dt_abs_diff   << " s\n"
+              << "  mean |dt - nominal|:  " << mean_dt_abs_diff << " s\n"
               << "  first IMU t0:         " << first_imu_t0 << " s\n"
-              << "  last  IMU t1:         " << last_imu_t1  << " s\n"
-              << "  first GT  t0:         " << first_gt_t0  << " s\n"
-              << "  last  GT  t1:         " << last_gt_t1   << " s\n"
-              << "  mean bias est:        ["
-                  << mean_bias.x() << ", "
-                  << mean_bias.y() << ", "
-                  << mean_bias.z() << "] rad/s\n"
-              << "  mean  bias norm:      " << mean_norm   << " rad/s\n"
+              << "  last  IMU t1:         " << last_imu_t1 << " s\n"
+              << "  first GT  t0:         " << first_gt_t0 << " s\n"
+              << "  last  GT  t1:         " << last_gt_t1 << " s\n"
+              << "  mean bias est:        [" << mean_bias.x() << ", " << mean_bias.y() << ", "
+              << mean_bias.z() << "] rad/s\n"
+              << "  mean  bias norm:      " << mean_norm << " rad/s\n"
               << "  median bias norm:     " << median_norm << " rad/s\n"
-              << "  mean  error:          " << mean_err    << " deg\n"
-              << "  max   error:          " << max_err     << " deg\n"
+              << "  mean  error:          " << mean_err << " deg\n"
+              << "  max   error:          " << max_err << " deg\n"
               << "  output:               " << argv[3] << '\n';
 
     return EXIT_SUCCESS;

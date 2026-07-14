@@ -16,10 +16,9 @@ namespace slam_core::imu {
 // Bias sign convention: omega_meas = omega_true + bias.
 //
 // Throws std::invalid_argument if dt_s <= 0 or dt_s is not finite.
-Eigen::Matrix3d propagate_gyro(
-    const Eigen::Matrix3d& R_W_B,
-    const Eigen::Vector3d& gyro_radps,
-    double                 dt_s,
-    const Eigen::Vector3d& gyro_bias_radps = Eigen::Vector3d::Zero());
+Eigen::Matrix3d propagate_gyro(const Eigen::Matrix3d& R_W_B,
+                               const Eigen::Vector3d& gyro_radps,
+                               double                 dt_s,
+                               const Eigen::Vector3d& gyro_bias_radps = Eigen::Vector3d::Zero());
 
 }  // namespace slam_core::imu

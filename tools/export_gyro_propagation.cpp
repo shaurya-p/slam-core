@@ -34,12 +34,10 @@
 
 namespace {
 
-void write_row(std::ofstream& out, double timestamp_s,
-               const Eigen::Matrix3d& R_W_B) {
+void write_row(std::ofstream& out, double timestamp_s, const Eigen::Matrix3d& R_W_B) {
     out << timestamp_s;
     for (int r = 0; r < 3; ++r)
-        for (int c = 0; c < 3; ++c)
-            out << ',' << R_W_B(r, c);
+        for (int c = 0; c < 3; ++c) out << ',' << R_W_B(r, c);
     out << '\n';
 }
 
@@ -56,8 +54,8 @@ int main(int argc, char* argv[]) {
         return EXIT_FAILURE;
     }
 
-    bool             use_bias_correction = false;
-    Eigen::Vector3d  gyro_bias           = Eigen::Vector3d::Zero();
+    bool            use_bias_correction = false;
+    Eigen::Vector3d gyro_bias           = Eigen::Vector3d::Zero();
 
     if (argc == 7) {
         if (std::string(argv[3]) != "--gyro-bias") {
@@ -74,7 +72,7 @@ int main(int argc, char* argv[]) {
     }
 
     std::vector<slam_core::imu::ImuMeasurement> imu_data;
-    int parse_skipped = 0;
+    int                                         parse_skipped = 0;
     try {
         imu_data = slam_core::io::read_euroc_imu_csv(argv[1], &parse_skipped);
     } catch (const std::exception& e) {
@@ -82,8 +80,7 @@ int main(int argc, char* argv[]) {
         return EXIT_FAILURE;
     }
     if (parse_skipped > 0)
-        std::cerr << "Warning: " << parse_skipped
-                  << " IMU rows skipped (unparseable)\n";
+        std::cerr << "Warning: " << parse_skipped << " IMU rows skipped (unparseable)\n";
 
     std::ofstream out_file(argv[2]);
     if (!out_file.is_open()) {
@@ -96,8 +93,8 @@ int main(int argc, char* argv[]) {
     if (use_bias_correction) {
         std::cerr << "export_gyro_propagation: bias correction enabled"
                      " (user-provided constant bias, offline validation only)\n"
-                  << "  gyro_bias_radps: ["
-                  << gyro_bias.x() << ", " << gyro_bias.y() << ", " << gyro_bias.z() << "]\n"
+                  << "  gyro_bias_radps: [" << gyro_bias.x() << ", " << gyro_bias.y() << ", "
+                  << gyro_bias.z() << "]\n"
                   << "  omega_corrected = omega_meas - gyro_bias\n";
     } else {
         std::cerr << "export_gyro_propagation: bias correction disabled (raw gyro)\n";
@@ -117,15 +114,14 @@ int main(int argc, char* argv[]) {
 
         const double dt_s = curr.timestamp_s - prev.timestamp_s;
         if (dt_s <= 0.0 || !std::isfinite(dt_s)) {
-            std::cerr << "Warning: non-positive dt_s=" << dt_s
-                      << " at t=" << curr.timestamp_s << ", skipping interval\n";
+            std::cerr << "Warning: non-positive dt_s=" << dt_s << " at t=" << curr.timestamp_s
+                      << ", skipping interval\n";
             ++skipped;
             continue;
         }
 
         // Zeroth-order hold: apply prev.gyro over [prev.timestamp_s, curr.timestamp_s].
-        R_W_B = slam_core::imu::propagate_gyro(
-            R_W_B, prev.gyro_radps, dt_s, gyro_bias);
+        R_W_B = slam_core::imu::propagate_gyro(R_W_B, prev.gyro_radps, dt_s, gyro_bias);
         write_row(out_file, curr.timestamp_s, R_W_B);
         ++written;
     }

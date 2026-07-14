@@ -17,9 +17,8 @@ namespace slam_core::io {
 //
 // Throws std::runtime_error if the file cannot be opened.
 // Throws std::invalid_argument if the file is empty or no row parses.
-std::vector<imu::ImuMeasurement> read_euroc_imu_csv(
-    const std::filesystem::path& path,
-    int*                         skipped_rows = nullptr);
+std::vector<imu::ImuMeasurement> read_euroc_imu_csv(const std::filesystem::path& path,
+                                                    int* skipped_rows = nullptr);
 
 // One EuRoC ground-truth sample.
 // EuRoC GT CSV: timestamp_ns, p_x, p_y, p_z, q_w, q_x, q_y, q_z, v_x, v_y, v_z, ...
@@ -40,15 +39,13 @@ struct EurocGtSample {
 //
 // Throws std::runtime_error if the file cannot be opened.
 // Throws std::invalid_argument if the file is empty or no row parses.
-std::vector<EurocGtSample> read_euroc_gt_csv(
-    const std::filesystem::path& path,
-    int*                         skipped_rows = nullptr);
+std::vector<EurocGtSample> read_euroc_gt_csv(const std::filesystem::path& path,
+                                             int*                         skipped_rows = nullptr);
 
 // Sample with the nearest timestamp by absolute difference; ties resolve to
 // the earlier sample. Requires samples sorted ascending by timestamp.
 //
 // Throws std::invalid_argument if samples is empty.
-const EurocGtSample& nearest_gt(double                            timestamp_s,
-                                const std::vector<EurocGtSample>& samples);
+const EurocGtSample& nearest_gt(double timestamp_s, const std::vector<EurocGtSample>& samples);
 
 }  // namespace slam_core::io

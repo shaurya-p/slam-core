@@ -4,9 +4,9 @@
 
 #include "slam_core/imu/imu_measurement.hpp"
 
+using slam_core::imu::has_strictly_increasing_timestamp;
 using slam_core::imu::ImuMeasurement;
 using slam_core::imu::is_finite;
-using slam_core::imu::has_strictly_increasing_timestamp;
 
 namespace {
 

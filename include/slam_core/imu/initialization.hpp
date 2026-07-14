@@ -21,6 +21,6 @@ namespace slam_core::imu {
 //   - near-zero mean accelerometer vector
 Eigen::Matrix3d estimate_R_W_B_from_stationary(
     const std::vector<ImuMeasurement>& measurements,
-    const Eigen::Vector3d& gravity_W = Eigen::Vector3d(0.0, 0.0, -9.81));
+    const Eigen::Vector3d&             gravity_W = Eigen::Vector3d(0.0, 0.0, -9.81));
 
 }  // namespace slam_core::imu

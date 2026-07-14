@@ -18,11 +18,9 @@ using slam_core::io::read_euroc_gt_csv;
 using slam_core::io::read_euroc_imu_csv;
 
 // Writes content to a unique file under the gtest temp dir and returns its path.
-std::filesystem::path write_temp_csv(const std::string& name,
-                                     const std::string& content) {
-    const std::filesystem::path path =
-        std::filesystem::path(testing::TempDir()) / name;
-    std::ofstream f(path);
+std::filesystem::path write_temp_csv(const std::string& name, const std::string& content) {
+    const std::filesystem::path path = std::filesystem::path(testing::TempDir()) / name;
+    std::ofstream               f(path);
     f << content;
     return path;
 }
@@ -37,11 +35,10 @@ const char* kGtHeader =
     "[m s^-1]\n";
 
 TEST(ReadEurocImuCsv, ParsesTimestampGyroAccel) {
-    const auto path = write_temp_csv(
-        "imu_basic.csv",
-        std::string(kImuHeader) +
-            "1403636579758555392,-0.1,0.2,0.3,8.0,-0.5,-2.0\n"
-            "1403636579763555584,0.4,-0.5,0.6,8.1,-0.6,-2.1\n");
+    const auto path =
+        write_temp_csv("imu_basic.csv", std::string(kImuHeader) +
+                                            "1403636579758555392,-0.1,0.2,0.3,8.0,-0.5,-2.0\n"
+                                            "1403636579763555584,0.4,-0.5,0.6,8.1,-0.6,-2.1\n");
 
     const auto samples = read_euroc_imu_csv(path);
     ASSERT_EQ(samples.size(), 2u);
@@ -56,17 +53,16 @@ TEST(ReadEurocImuCsv, ParsesTimestampGyroAccel) {
 }
 
 TEST(ReadEurocImuCsv, SkipsMalformedBlankAndCommentRows) {
-    const auto path = write_temp_csv(
-        "imu_malformed.csv",
-        std::string(kImuHeader) +
-            "1000000000,0.1,0.2,0.3,1.0,2.0,3.0\n"
-            "\n"
-            "# a comment row\n"
-            "2000000000,0.1,not_a_number,0.3,1.0,2.0,3.0\n"
-            "3000000000,0.1,0.2\n"
-            "4000000000,0.1,0.2,0.3,1.0,2.0,3.0\n");
+    const auto path =
+        write_temp_csv("imu_malformed.csv", std::string(kImuHeader) +
+                                                "1000000000,0.1,0.2,0.3,1.0,2.0,3.0\n"
+                                                "\n"
+                                                "# a comment row\n"
+                                                "2000000000,0.1,not_a_number,0.3,1.0,2.0,3.0\n"
+                                                "3000000000,0.1,0.2\n"
+                                                "4000000000,0.1,0.2,0.3,1.0,2.0,3.0\n");
 
-    int skipped = -1;
+    int        skipped = -1;
     const auto samples = read_euroc_imu_csv(path, &skipped);
     ASSERT_EQ(samples.size(), 2u);
     EXPECT_EQ(skipped, 2);  // malformed value + short row; blank/comment not counted
@@ -75,8 +71,7 @@ TEST(ReadEurocImuCsv, SkipsMalformedBlankAndCommentRows) {
 }
 
 TEST(ReadEurocImuCsv, MissingFileThrowsRuntimeError) {
-    EXPECT_THROW(read_euroc_imu_csv("/nonexistent/imu.csv"),
-                 std::runtime_error);
+    EXPECT_THROW(read_euroc_imu_csv("/nonexistent/imu.csv"), std::runtime_error);
 }
 
 TEST(ReadEurocImuCsv, EmptyFileThrowsInvalidArgument) {
@@ -92,9 +87,8 @@ TEST(ReadEurocImuCsv, HeaderOnlyThrowsInvalidArgument) {
 TEST(ReadEurocGtCsv, ParsesPositionQuaternionVelocity) {
     // Quaternion deliberately unnormalized (norm 2): [1, 1, 1, 1].
     const auto path = write_temp_csv(
-        "gt_basic.csv",
-        std::string(kGtHeader) +
-            "1403636580838555648,4.6,-1.8,0.8,1.0,1.0,1.0,1.0,0.01,-0.02,0.03\n");
+        "gt_basic.csv", std::string(kGtHeader) +
+                            "1403636580838555648,4.6,-1.8,0.8,1.0,1.0,1.0,1.0,0.01,-0.02,0.03\n");
 
     const auto samples = read_euroc_gt_csv(path);
     ASSERT_EQ(samples.size(), 1u);
@@ -115,15 +109,14 @@ TEST(ReadEurocGtCsv, ParsesPositionQuaternionVelocity) {
 }
 
 TEST(ReadEurocGtCsv, SkipsShortAndZeroQuaternionRows) {
-    const auto path = write_temp_csv(
-        "gt_malformed.csv",
-        std::string(kGtHeader) +
-            "1000000000,0,0,0,1,0,0,0,0,0,0\n"
-            "2000000000,0,0,0,1,0,0\n"                // short row
-            "3000000000,0,0,0,0,0,0,0,0,0,0\n"        // zero quaternion
-            "4000000000,1,2,3,0,0,0,1,0,0,0\n");
+    const auto path = write_temp_csv("gt_malformed.csv",
+                                     std::string(kGtHeader) +
+                                         "1000000000,0,0,0,1,0,0,0,0,0,0\n"
+                                         "2000000000,0,0,0,1,0,0\n"          // short row
+                                         "3000000000,0,0,0,0,0,0,0,0,0,0\n"  // zero quaternion
+                                         "4000000000,1,2,3,0,0,0,1,0,0,0\n");
 
-    int skipped = -1;
+    int        skipped = -1;
     const auto samples = read_euroc_gt_csv(path, &skipped);
     ASSERT_EQ(samples.size(), 2u);
     EXPECT_EQ(skipped, 2);
