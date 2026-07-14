@@ -31,6 +31,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdlib>
+#include <filesystem>
 #include <fstream>
 #include <iomanip>
 #include <iostream>
@@ -109,7 +110,11 @@ int main(int argc, char* argv[]) {
     const double gt_end   = gt_data.back().timestamp_s;
 
     // Open output.
-    std::ofstream out_file(argv[3]);
+    const std::filesystem::path out_path(argv[3]);
+    if (out_path.has_parent_path()) {
+        std::filesystem::create_directories(out_path.parent_path());
+    }
+    std::ofstream out_file(out_path);
     if (!out_file.is_open()) {
         std::cerr << "Error: cannot open output: " << argv[3] << '\n';
         return EXIT_FAILURE;

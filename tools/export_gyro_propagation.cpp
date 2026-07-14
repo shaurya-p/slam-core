@@ -20,6 +20,7 @@
 
 #include <cmath>
 #include <cstdlib>
+#include <filesystem>
 #include <fstream>
 #include <iomanip>
 #include <iostream>
@@ -82,7 +83,11 @@ int main(int argc, char* argv[]) {
     if (parse_skipped > 0)
         std::cerr << "Warning: " << parse_skipped << " IMU rows skipped (unparseable)\n";
 
-    std::ofstream out_file(argv[2]);
+    const std::filesystem::path out_path(argv[2]);
+    if (out_path.has_parent_path()) {
+        std::filesystem::create_directories(out_path.parent_path());
+    }
+    std::ofstream out_file(out_path);
     if (!out_file.is_open()) {
         std::cerr << "Error: cannot open output: " << argv[2] << '\n';
         return EXIT_FAILURE;
