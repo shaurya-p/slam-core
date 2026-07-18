@@ -14,7 +14,7 @@ Requires CMake ≥ 3.24, a C++17 compiler, Eigen (3.4–5.x), and
 [uv](https://docs.astral.sh/uv/) for the Python tooling.
 
 ```bash
-git clone https://github.com/shauryaparashar/slam-core.git
+git clone https://github.com/shaurya-p/slam-core.git
 cd slam-core
 
 # C++ library, tools, and tests (googletest is fetched automatically)
