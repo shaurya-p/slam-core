@@ -12,6 +12,10 @@ include/slam_core/ + src/     C++ library (namespace slam_core::*)
                initialization; depends on geometry
   camera/      projection models; depends on geometry
   io/          dataset CSV readers (EuRoC); depends on imu types
+  optim/       on-manifold least squares: Variable/Factor/Problem + dense
+               Levenberg-Marquardt; depends only on Eigen + geometry
+  factors/     residual definitions with analytic tangent-space Jacobians;
+               depends on optim, geometry, imu
 tools/         CLI executables over the library; no estimation math of
                their own — parsing, argument handling, and CSV writing only
 python/slam_core_tools/
@@ -75,6 +79,16 @@ Rules of thumb:
   Jacobians are future work.
 - `estimate_R_W_B_from_stationary` — gravity alignment from a stationary
   accelerometer window (roll/pitch only; yaw unobservable).
+
+### optim + factors
+
+`Variable` (SO(3) with right-multiplied retract, additive vectors),
+`Factor` (residual + per-variable tangent Jacobians), `Problem` (dense
+normal equations), Levenberg-Marquardt with Marquardt scaling and an
+iteration callback. Factors: SO(3)/vector priors, point alignment,
+6-DoF relative pose. Derivations and conventions:
+[derivations/fg1_manifold_lm.md](derivations/fg1_manifold_lm.md).
+Every analytic Jacobian is validated against numeric differentiation.
 
 ### camera
 
