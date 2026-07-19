@@ -1,7 +1,10 @@
 #include <gtest/gtest.h>
 #include <Eigen/Core>
+#include <Eigen/Eigenvalues>
 #include <cmath>
+#include <cstdint>
 #include <limits>
+#include <random>
 #include <stdexcept>
 #include <vector>
 
@@ -512,4 +515,206 @@ TEST(IntegrateWindow, BiasCancellationOverWindow) {
     EXPECT_TRUE(result.delta_R.isApprox(Eigen::Matrix3d::Identity(), 1e-9));
     EXPECT_TRUE(result.delta_v.isApprox(Eigen::Vector3d::Zero(), 1e-9));
     EXPECT_TRUE(result.delta_p.isApprox(Eigen::Vector3d::Zero(), 1e-9));
+}
+
+// --- FG-3: covariance propagation and bias-correction Jacobians ---
+
+using slam_core::geometry::log_so3;
+using slam_core::imu::delta_p_corrected;
+using slam_core::imu::delta_R_corrected;
+using slam_core::imu::delta_v_corrected;
+using slam_core::imu::ImuNoiseParams;
+
+namespace {
+
+// Deterministic N(0,1) via Box-Muller on raw mt19937 draws; avoids
+// std::normal_distribution implementation differences across platforms.
+class Gaussian {
+public:
+    explicit Gaussian(std::uint32_t seed) : rng_(seed) {}
+    double operator()() {
+        const double u1 = (static_cast<double>(rng_()) + 1.0) / 4294967297.0;
+        const double u2 = (static_cast<double>(rng_()) + 1.0) / 4294967297.0;
+        return std::sqrt(-2.0 * std::log(u1)) * std::cos(2.0 * M_PI * u2);
+    }
+    Eigen::Vector3d vec3() { return {(*this)(), (*this)(), (*this)()}; }
+
+private:
+    std::mt19937 rng_;
+};
+
+// Time-varying synthetic trajectory: rotating and accelerating.
+std::vector<ImuMeasurement> varying_sequence(int n_meas, double dt) {
+    std::vector<ImuMeasurement> seq;
+    seq.reserve(n_meas);
+    for (int i = 0; i < n_meas; ++i) {
+        const double   t = i * dt;
+        ImuMeasurement m;
+        m.timestamp_s = t;
+        m.gyro_radps  = {0.3 * std::sin(2.0 * t), -0.2 + 0.1 * std::cos(3.0 * t), 0.5};
+        m.accel_mps2  = {1.0 * std::cos(t), -0.5 * std::sin(2.0 * t), 9.81 + 0.3 * t};
+        seq.push_back(m);
+    }
+    return seq;
+}
+
+PreintegratedImu integrate_all(const std::vector<ImuMeasurement>& seq,
+                               const Eigen::Vector3d&             bg,
+                               const Eigen::Vector3d&             ba,
+                               double                             dt,
+                               const ImuNoiseParams&              noise = ImuNoiseParams{}) {
+    PreintegratedImu preint;
+    for (const ImuMeasurement& m : seq) integrate(preint, m, bg, ba, dt, noise);
+    return preint;
+}
+
+}  // namespace
+
+TEST(PreintegrationCovariance, StaysZeroWithoutNoise) {
+    const auto             seq = varying_sequence(100, 0.005);
+    const PreintegratedImu p = integrate_all(seq, {0.01, -0.02, 0.015}, {0.05, -0.1, 0.08}, 0.005);
+    EXPECT_LT(p.covariance.cwiseAbs().maxCoeff(), 1e-300);
+}
+
+TEST(PreintegrationCovariance, SymmetricPsdAndGrowing) {
+    const ImuNoiseParams noise{1.7e-4, 2.0e-3};  // EuRoC-like densities
+    const auto           seq = varying_sequence(200, 0.005);
+
+    PreintegratedImu preint;
+    double           prev_trace = 0.0;
+    for (const ImuMeasurement& m : seq) {
+        integrate(preint, m, Eigen::Vector3d::Zero(), Eigen::Vector3d::Zero(), 0.005, noise);
+        const double trace = preint.covariance.trace();
+        EXPECT_GT(trace, prev_trace);
+        prev_trace = trace;
+    }
+
+    EXPECT_TRUE(preint.covariance.isApprox(preint.covariance.transpose(), 1e-12));
+    const Eigen::SelfAdjointEigenSolver<Eigen::Matrix<double, 9, 9>> eig(preint.covariance);
+    EXPECT_GE(eig.eigenvalues().minCoeff(), -1e-18);
+    EXPECT_TRUE(preint.covariance.allFinite());
+}
+
+TEST(PreintegrationBiasJacobians, MatchNumericDerivatives) {
+    const double          dt  = 0.005;
+    const auto            seq = varying_sequence(200, dt);  // 1 s of data
+    const Eigen::Vector3d bg(0.01, -0.02, 0.015);
+    const Eigen::Vector3d ba(0.05, -0.1, 0.08);
+
+    const PreintegratedImu nominal = integrate_all(seq, bg, ba, dt);
+
+    const double    h = 1e-6;
+    Eigen::Matrix3d num_dR_dbg, num_dv_dbg, num_dv_dba, num_dp_dbg, num_dp_dba;
+    Eigen::Matrix3d num_dR_dba;  // must be ~0: accel bias cannot rotate
+
+    for (int i = 0; i < 3; ++i) {
+        Eigen::Vector3d e = Eigen::Vector3d::Zero();
+        e(i)              = h;
+
+        const PreintegratedImu gp = integrate_all(seq, bg + e, ba, dt);
+        const PreintegratedImu gm = integrate_all(seq, bg - e, ba, dt);
+        const PreintegratedImu ap = integrate_all(seq, bg, ba + e, dt);
+        const PreintegratedImu am = integrate_all(seq, bg, ba - e, dt);
+
+        num_dR_dbg.col(i) = (log_so3(nominal.delta_R.transpose() * gp.delta_R) -
+                             log_so3(nominal.delta_R.transpose() * gm.delta_R)) /
+                            (2.0 * h);
+        num_dR_dba.col(i) = (log_so3(nominal.delta_R.transpose() * ap.delta_R) -
+                             log_so3(nominal.delta_R.transpose() * am.delta_R)) /
+                            (2.0 * h);
+        num_dv_dbg.col(i) = (gp.delta_v - gm.delta_v) / (2.0 * h);
+        num_dv_dba.col(i) = (ap.delta_v - am.delta_v) / (2.0 * h);
+        num_dp_dbg.col(i) = (gp.delta_p - gm.delta_p) / (2.0 * h);
+        num_dp_dba.col(i) = (ap.delta_p - am.delta_p) / (2.0 * h);
+    }
+
+    EXPECT_LT((nominal.d_delta_R_d_bg - num_dR_dbg).cwiseAbs().maxCoeff(), 1e-5);
+    EXPECT_LT((nominal.d_delta_v_d_bg - num_dv_dbg).cwiseAbs().maxCoeff(), 1e-5);
+    EXPECT_LT((nominal.d_delta_v_d_ba - num_dv_dba).cwiseAbs().maxCoeff(), 1e-5);
+    EXPECT_LT((nominal.d_delta_p_d_bg - num_dp_dbg).cwiseAbs().maxCoeff(), 1e-5);
+    EXPECT_LT((nominal.d_delta_p_d_ba - num_dp_dba).cwiseAbs().maxCoeff(), 1e-5);
+    EXPECT_LT(num_dR_dba.cwiseAbs().maxCoeff(), 1e-9);
+}
+
+TEST(PreintegrationBiasJacobians, CorrectedDeltasMatchReintegration) {
+    const double          dt  = 0.005;
+    const auto            seq = varying_sequence(200, dt);
+    const Eigen::Vector3d bg(0.01, -0.02, 0.015);
+    const Eigen::Vector3d ba(0.05, -0.1, 0.08);
+    const Eigen::Vector3d dbg(2e-3, -1e-3, 1.5e-3);
+    const Eigen::Vector3d dba(5e-3, 3e-3, -4e-3);
+
+    const PreintegratedImu nominal = integrate_all(seq, bg, ba, dt);
+    const PreintegratedImu exact   = integrate_all(seq, bg + dbg, ba + dba, dt);
+
+    const Eigen::Matrix3d R_corr = delta_R_corrected(nominal, dbg);
+    const Eigen::Vector3d v_corr = delta_v_corrected(nominal, dbg, dba);
+    const Eigen::Vector3d p_corr = delta_p_corrected(nominal, dbg, dba);
+
+    const double R_err_corr   = log_so3(exact.delta_R.transpose() * R_corr).norm();
+    const double R_err_uncorr = log_so3(exact.delta_R.transpose() * nominal.delta_R).norm();
+    const double v_err_corr   = (v_corr - exact.delta_v).norm();
+    const double v_err_uncorr = (nominal.delta_v - exact.delta_v).norm();
+    const double p_err_corr   = (p_corr - exact.delta_p).norm();
+    const double p_err_uncorr = (nominal.delta_p - exact.delta_p).norm();
+
+    // First-order correction: residual error is O(|db|^2).
+    EXPECT_LT(R_err_corr, 1e-5);
+    EXPECT_LT(v_err_corr, 1e-4);
+    EXPECT_LT(p_err_corr, 1e-4);
+    // And it must actually help, by a wide margin.
+    EXPECT_GT(R_err_uncorr, 10.0 * R_err_corr);
+    EXPECT_GT(v_err_uncorr, 10.0 * v_err_corr);
+    EXPECT_GT(p_err_uncorr, 10.0 * p_err_corr);
+}
+
+TEST(PreintegrationCovariance, MonteCarloConsistency) {
+    // Error convention (matches the propagation model):
+    //   e_theta = log_so3(delta_R_refᵀ · delta_R_trial), e_v/e_p additive.
+    const double         dt       = 0.005;
+    const int            n_steps  = 100;  // 0.5 s
+    const int            n_trials = 500;
+    const ImuNoiseParams noise{1.7e-3, 2.0e-2};  // 10x EuRoC: cleaner statistics
+
+    const auto             seq = varying_sequence(n_steps, dt);
+    const PreintegratedImu ref =
+        integrate_all(seq, Eigen::Vector3d::Zero(), Eigen::Vector3d::Zero(), dt, noise);
+
+    const double sigma_gd = noise.gyro_noise_density / std::sqrt(dt);
+    const double sigma_ad = noise.accel_noise_density / std::sqrt(dt);
+
+    Gaussian                          gaussian(1234);
+    Eigen::Matrix<double, 9, 9>       sample_cov = Eigen::Matrix<double, 9, 9>::Zero();
+    double                            nees_sum   = 0.0;
+    const Eigen::Matrix<double, 9, 9> info       = ref.covariance.inverse();
+
+    for (int trial = 0; trial < n_trials; ++trial) {
+        PreintegratedImu p;
+        for (const ImuMeasurement& m : seq) {
+            ImuMeasurement noisy = m;
+            noisy.gyro_radps += sigma_gd * gaussian.vec3();
+            noisy.accel_mps2 += sigma_ad * gaussian.vec3();
+            integrate(p, noisy, Eigen::Vector3d::Zero(), Eigen::Vector3d::Zero(), dt);
+        }
+        Eigen::Matrix<double, 9, 1> e;
+        e.segment<3>(0) = log_so3(ref.delta_R.transpose() * p.delta_R);
+        e.segment<3>(3) = p.delta_v - ref.delta_v;
+        e.segment<3>(6) = p.delta_p - ref.delta_p;
+
+        sample_cov += e * e.transpose();
+        nees_sum += e.dot(info * e);
+    }
+    sample_cov /= n_trials;
+
+    // Mean NEES for a 9-dim consistent estimator is 9; SE ≈ sqrt(2*9/500).
+    const double mean_nees = nees_sum / n_trials;
+    EXPECT_GT(mean_nees, 7.8);
+    EXPECT_LT(mean_nees, 10.2);
+
+    // Per-axis variance ratios (sampling error ~ sqrt(2/500) ≈ 6%).
+    for (int i = 0; i < 9; ++i) {
+        const double ratio = sample_cov(i, i) / ref.covariance(i, i);
+        EXPECT_GT(ratio, 0.75) << "axis " << i;
+        EXPECT_LT(ratio, 1.30) << "axis " << i;
+    }
 }
