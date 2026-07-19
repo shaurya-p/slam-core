@@ -43,3 +43,7 @@ gtest_discover_tests(test_optim)
 add_executable(test_imu_factor test_imu_factor.cpp)
 target_link_libraries(test_imu_factor PRIVATE GTest::gtest_main slam_core)
 gtest_discover_tests(test_imu_factor)
+
+add_executable(test_reprojection_factor test_reprojection_factor.cpp)
+target_link_libraries(test_reprojection_factor PRIVATE GTest::gtest_main slam_core)
+gtest_discover_tests(test_reprojection_factor)
