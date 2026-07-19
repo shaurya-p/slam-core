@@ -39,3 +39,7 @@ gtest_discover_tests(test_so3_jacobians)
 add_executable(test_optim test_optim.cpp)
 target_link_libraries(test_optim PRIVATE GTest::gtest_main slam_core)
 gtest_discover_tests(test_optim)
+
+add_executable(test_imu_factor test_imu_factor.cpp)
+target_link_libraries(test_imu_factor PRIVATE GTest::gtest_main slam_core)
+gtest_discover_tests(test_imu_factor)

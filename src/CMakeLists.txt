@@ -15,6 +15,7 @@ add_library(slam_core STATIC
     factors/prior_factors.cpp
     factors/point_alignment_factor.cpp
     factors/relative_pose_factor.cpp
+    factors/imu_factor.cpp
 )
 
 target_include_directories(slam_core PUBLIC ${PROJECT_SOURCE_DIR}/include)
