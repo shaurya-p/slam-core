@@ -9,3 +9,6 @@ target_link_libraries(evaluate_gyro_bias_from_gt PRIVATE slam_core)
 
 add_executable(evaluate_accel_bias_from_gt evaluate_accel_bias_from_gt.cpp)
 target_link_libraries(evaluate_accel_bias_from_gt PRIVATE slam_core)
+
+add_executable(demo_lm_point_alignment demo_lm_point_alignment.cpp)
+target_link_libraries(demo_lm_point_alignment PRIVATE slam_core)
