@@ -36,6 +36,18 @@ struct PinholeCamera {
     // x = (u - cx) / fx,  y = (v - cy) / fy,  bearing = normalize([x, y, 1])
     // Throws std::invalid_argument if pixel has non-finite coordinates.
     Eigen::Vector3d unproject_to_bearing(const Eigen::Vector2d& pixel) const;
+
+    // Non-throwing projection for optimizer use: returns false (leaving
+    // pixel untouched) if p_C is non-finite or Z <= z_min. An optimizer
+    // line search may legitimately probe behind-camera states; callers
+    // decide the failure policy instead of unwinding.
+    bool try_project(const Eigen::Vector3d& p_C, Eigen::Vector2d& pixel, double z_min = 1e-6) const;
+
+    // Jacobian of project() w.r.t. p_C, evaluated at p_C (2x3):
+    //   d[u,v]/dp_C = [ fx/Z    0    -fx*X/Z² ]
+    //                 [   0   fy/Z  -fy*Y/Z²  ]
+    // Throws like project() (non-finite p_C or Z <= 0).
+    Eigen::Matrix<double, 2, 3> project_jacobian(const Eigen::Vector3d& p_C) const;
 };
 
 }  // namespace slam_core::camera

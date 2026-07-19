@@ -173,3 +173,43 @@ TEST(PinholeCamera, Unproject_NonFiniteV) {
     PinholeCamera cam(400.0, 400.0, 320.0, 240.0);
     EXPECT_THROW(cam.unproject_to_bearing({320.0, kInf}), std::invalid_argument);
 }
+
+// --- FG-5: try_project and project_jacobian ---
+
+TEST(PinholeCamera, TryProjectAgreesWithProject) {
+    const PinholeCamera   cam(458.654, 457.296, 367.215, 248.375);
+    const Eigen::Vector3d p_C(0.3, -0.2, 2.5);
+    Eigen::Vector2d       pixel;
+    ASSERT_TRUE(cam.try_project(p_C, pixel));
+    EXPECT_TRUE(pixel.isApprox(cam.project(p_C), 1e-12));
+}
+
+TEST(PinholeCamera, TryProjectRejectsBehindCamera) {
+    const PinholeCamera cam(458.654, 457.296, 367.215, 248.375);
+    Eigen::Vector2d     pixel(-1.0, -1.0);
+    EXPECT_FALSE(cam.try_project({0.1, 0.1, -1.0}, pixel));
+    EXPECT_FALSE(cam.try_project({0.1, 0.1, 0.0}, pixel));
+    EXPECT_FALSE(cam.try_project({0.1, 0.1, 1e-9}, pixel));
+    // pixel untouched on failure
+    EXPECT_DOUBLE_EQ(pixel.x(), -1.0);
+    EXPECT_DOUBLE_EQ(pixel.y(), -1.0);
+}
+
+TEST(PinholeCamera, ProjectJacobianMatchesNumeric) {
+    const PinholeCamera   cam(458.654, 457.296, 367.215, 248.375);
+    const Eigen::Vector3d p_C(0.4, -0.3, 1.8);
+    const double          h = 1e-7;
+
+    const Eigen::Matrix<double, 2, 3> J = cam.project_jacobian(p_C);
+    for (int i = 0; i < 3; ++i) {
+        Eigen::Vector3d e             = Eigen::Vector3d::Zero();
+        e(i)                          = h;
+        const Eigen::Vector2d numeric = (cam.project(p_C + e) - cam.project(p_C - e)) / (2.0 * h);
+        EXPECT_LT((J.col(i) - numeric).norm(), 1e-5) << "column " << i;
+    }
+}
+
+TEST(PinholeCamera, ProjectJacobianThrowsBehindCamera) {
+    const PinholeCamera cam(458.654, 457.296, 367.215, 248.375);
+    EXPECT_THROW(cam.project_jacobian({0.0, 0.0, -1.0}), std::invalid_argument);
+}

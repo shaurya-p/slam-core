@@ -45,4 +45,29 @@ Eigen::Vector3d PinholeCamera::unproject_to_bearing(const Eigen::Vector2d& pixel
     return ray.normalized();
 }
 
+bool PinholeCamera::try_project(const Eigen::Vector3d& p_C,
+                                Eigen::Vector2d&       pixel,
+                                double                 z_min) const {
+    if (!p_C.allFinite() || p_C.z() <= z_min) {
+        return false;
+    }
+    pixel = {fx * p_C.x() / p_C.z() + cx, fy * p_C.y() / p_C.z() + cy};
+    return true;
+}
+
+Eigen::Matrix<double, 2, 3> PinholeCamera::project_jacobian(const Eigen::Vector3d& p_C) const {
+    if (!p_C.allFinite()) {
+        throw std::invalid_argument(
+            "PinholeCamera::project_jacobian: p_C has non-finite coordinates");
+    }
+    if (p_C.z() <= 0.0) {
+        throw std::invalid_argument("PinholeCamera::project_jacobian: Z must be positive");
+    }
+    const double                z_inv  = 1.0 / p_C.z();
+    const double                z_inv2 = z_inv * z_inv;
+    Eigen::Matrix<double, 2, 3> J;
+    J << fx * z_inv, 0.0, -fx * p_C.x() * z_inv2, 0.0, fy * z_inv, -fy * p_C.y() * z_inv2;
+    return J;
+}
+
 }  // namespace slam_core::camera
