@@ -88,9 +88,12 @@ Rules of thumb:
 `Variable` (SO(3) with right-multiplied retract, additive vectors),
 `Factor` (residual + per-variable tangent Jacobians), `Problem` (dense
 normal equations), Levenberg-Marquardt with Marquardt scaling and an
-iteration callback. Factors: SO(3)/vector priors, point alignment,
-6-DoF relative pose. Derivations and conventions:
-[derivations/fg1_manifold_lm.md](derivations/fg1_manifold_lm.md).
+iteration callback. Factors: SO(3)/vector priors (sigma-weighted),
+point alignment, 6-DoF relative pose, the preintegrated IMU factor
+(whitened by the FG-3 covariance, bias-corrected without re-integration),
+and a bias random-walk factor. Derivations and conventions:
+[derivations/fg1_manifold_lm.md](derivations/fg1_manifold_lm.md),
+[derivations/fg4_imu_factor.md](derivations/fg4_imu_factor.md).
 Every analytic Jacobian is validated against numeric differentiation.
 
 ### camera
@@ -113,5 +116,7 @@ visualization.
 | `export_imu_state_propagation` | full-state dead-reckoning CSV; `--init-from-gt` / `--init-from-stationary`; optional biases |
 | `evaluate_gyro_bias_from_gt` | per-window gyro bias from GT relative rotation |
 | `evaluate_accel_bias_from_gt` | per-window accel bias from GT velocity change |
+| `optimize_imu_chain` | keyframe factor-graph optimization on EuRoC: IMU + bias-walk factors, GT end priors |
+| `demo_lm_point_alignment` | synthetic LM convergence demo for the Rerun visualization |
 
 All are offline validation tools; none represent a runtime estimator.
