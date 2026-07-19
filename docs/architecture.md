@@ -75,8 +75,11 @@ Rules of thumb:
   state propagation (bias-corrected gyro and accel, gravity-compensated).
 - `PreintegratedImu` with `integrate`, `integrate_sequence`,
   `integrate_window` — body-frame deltas between keyframe timestamps;
-  gravity excluded, handled at the factor level. Covariance and bias
-  Jacobians are future work.
+  gravity excluded, handled at the factor level. Carries the 9x9
+  `[δθ, δv, δp]` covariance (from `ImuNoiseParams` continuous densities)
+  and bias-correction Jacobians; `delta_*_corrected` relinearize deltas
+  for a bias update without re-integrating. Derivations:
+  [derivations/fg3_preintegration_covariance.md](derivations/fg3_preintegration_covariance.md).
 - `estimate_R_W_B_from_stationary` — gravity alignment from a stationary
   accelerometer window (roll/pitch only; yaw unobservable).
 
