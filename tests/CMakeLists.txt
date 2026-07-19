@@ -47,3 +47,7 @@ gtest_discover_tests(test_imu_factor)
 add_executable(test_reprojection_factor test_reprojection_factor.cpp)
 target_link_libraries(test_reprojection_factor PRIVATE GTest::gtest_main slam_core)
 gtest_discover_tests(test_reprojection_factor)
+
+add_executable(test_vi_graph test_vi_graph.cpp)
+target_link_libraries(test_vi_graph PRIVATE GTest::gtest_main slam_core)
+gtest_discover_tests(test_vi_graph)
