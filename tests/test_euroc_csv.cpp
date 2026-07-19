@@ -170,3 +170,55 @@ TEST(NearestGt, EmptyThrowsInvalidArgument) {
 }
 
 }  // namespace
+
+// --- FG-5: camera sensor.yaml calibration ---
+
+#include "slam_core/io/euroc_camera.hpp"
+
+namespace {
+
+const char* kCamYaml = R"(# General sensor definitions.
+sensor_type: camera
+
+T_BS:
+  cols: 4
+  rows: 4
+  data: [0.0148655429818, -0.999880929698, 0.00414029679422, -0.0216401454975,
+         0.999557249008, 0.0149672133247, 0.025715529948, -0.064676986768,
+        -0.0257744366974, 0.00375618835797, 0.999660727178, 0.00981073058949,
+         0.0, 0.0, 0.0, 1.0]
+
+rate_hz: 20
+resolution: [752, 480]
+camera_model: pinhole
+intrinsics: [458.654, 457.296, 367.215, 248.375] #fu, fv, cu, cv
+distortion_model: radial-tangential
+distortion_coefficients: [-0.28340811, 0.07395907, 0.00019359, 1.76187114e-05]
+)";
+
+}  // namespace
+
+TEST(ReadEurocCameraYaml, ParsesEurocCam0Format) {
+    const auto path  = write_temp_csv("cam_sensor.yaml", kCamYaml);
+    const auto calib = slam_core::io::read_euroc_camera_yaml(path);
+
+    EXPECT_TRUE(slam_core::geometry::is_valid_rotation(calib.R_B_C, 1e-4));
+    EXPECT_NEAR(calib.R_B_C(0, 0), 0.0148655429818, 1e-12);
+    EXPECT_NEAR(calib.R_B_C(2, 2), 0.999660727178, 1e-12);
+    EXPECT_NEAR(calib.t_B_C.x(), -0.0216401454975, 1e-12);
+    EXPECT_NEAR(calib.t_B_C.z(), 0.00981073058949, 1e-12);
+    EXPECT_DOUBLE_EQ(calib.fx, 458.654);
+    EXPECT_DOUBLE_EQ(calib.cy, 248.375);
+    EXPECT_EQ(calib.width, 752);
+    EXPECT_EQ(calib.height, 480);
+    EXPECT_DOUBLE_EQ(calib.rate_hz, 20.0);
+    EXPECT_NEAR(calib.distortion_radtan(0), -0.28340811, 1e-12);
+    EXPECT_NEAR(calib.distortion_radtan(3), 1.76187114e-05, 1e-15);
+}
+
+TEST(ReadEurocCameraYaml, MissingFileAndMissingKeyThrow) {
+    EXPECT_THROW(slam_core::io::read_euroc_camera_yaml("/nonexistent/sensor.yaml"),
+                 std::runtime_error);
+    const auto path = write_temp_csv("cam_bad.yaml", "sensor_type: camera\nrate_hz: 20\n");
+    EXPECT_THROW(slam_core::io::read_euroc_camera_yaml(path), std::invalid_argument);
+}

@@ -8,6 +8,7 @@ add_library(slam_core STATIC
     imu/initialization.cpp
     camera/pinhole_camera.cpp
     io/euroc_csv.cpp
+    io/euroc_camera.cpp
     optim/variable.cpp
     optim/factor.cpp
     optim/problem.cpp
