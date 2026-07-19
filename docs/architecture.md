@@ -120,6 +120,7 @@ package has equivalent loaders for visualization.
 | `evaluate_gyro_bias_from_gt` | per-window gyro bias from GT relative rotation |
 | `evaluate_accel_bias_from_gt` | per-window accel bias from GT velocity change |
 | `optimize_imu_chain` | keyframe factor-graph optimization on EuRoC: IMU + bias-walk factors, GT end priors |
+| `optimize_vi_chain` | full visual-inertial optimization on EuRoC: IMU + reprojection + bias-walk, first-pose prior only, synthetic landmark tracks |
 | `demo_lm_point_alignment` | synthetic LM convergence demo for the Rerun visualization |
 
 All are offline validation tools; none represent a runtime estimator.
