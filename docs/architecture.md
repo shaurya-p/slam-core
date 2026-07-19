@@ -91,7 +91,8 @@ normal equations), Levenberg-Marquardt with Marquardt scaling and an
 iteration callback. Factors: SO(3)/vector priors (sigma-weighted),
 point alignment, 6-DoF relative pose, the preintegrated IMU factor
 (whitened by the FG-3 covariance, bias-corrected without re-integration),
-and a bias random-walk factor. Derivations and conventions:
+a bias random-walk factor, and the landmark reprojection factor
+(fixed T_B_C, behind-camera steps rejected by cost). Derivations:
 [derivations/fg1_manifold_lm.md](derivations/fg1_manifold_lm.md),
 [derivations/fg4_imu_factor.md](derivations/fg4_imu_factor.md).
 Every analytic Jacobian is validated against numeric differentiation.
@@ -99,14 +100,16 @@ Every analytic Jacobian is validated against numeric differentiation.
 ### camera
 
 `PinholeCamera` (no distortion): `project`, `unproject_to_bearing`,
-`reprojection_error`.
+`reprojection_error`, non-throwing `try_project`, and `project_jacobian`
+(2x3 d(pixel)/dp_C for factors).
 
 ### io
 
 `read_euroc_imu_csv`, `read_euroc_gt_csv` (returning `EurocGtSample` with
 `p_W_B`, normalized `q_W_B`, `v_W_B`), and binary-search `nearest_gt`.
-Shared by all tools; the Python package has equivalent loaders for
-visualization.
+`read_euroc_camera_yaml` parses cam sensor.yaml (T_B_C, intrinsics,
+resolution, distortion coefficients). Shared by all tools; the Python
+package has equivalent loaders for visualization.
 
 ## Tools
 
