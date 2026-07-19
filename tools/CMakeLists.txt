@@ -15,3 +15,6 @@ target_link_libraries(demo_lm_point_alignment PRIVATE slam_core)
 
 add_executable(optimize_imu_chain optimize_imu_chain.cpp)
 target_link_libraries(optimize_imu_chain PRIVATE slam_core)
+
+add_executable(optimize_vi_chain optimize_vi_chain.cpp)
+target_link_libraries(optimize_vi_chain PRIVATE slam_core)
