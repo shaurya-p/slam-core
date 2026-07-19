@@ -8,6 +8,13 @@ add_library(slam_core STATIC
     imu/initialization.cpp
     camera/pinhole_camera.cpp
     io/euroc_csv.cpp
+    optim/variable.cpp
+    optim/factor.cpp
+    optim/problem.cpp
+    optim/levenberg_marquardt.cpp
+    factors/prior_factors.cpp
+    factors/point_alignment_factor.cpp
+    factors/relative_pose_factor.cpp
 )
 
 target_include_directories(slam_core PUBLIC ${PROJECT_SOURCE_DIR}/include)
