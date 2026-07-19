@@ -103,3 +103,15 @@ TEST(SO3Log, ExactPiRoundTrip) {
     const Eigen::Matrix3d R = exp_so3(M_PI * Eigen::Vector3d{1.0, 0.0, 0.0});
     EXPECT_TRUE(exp_so3(log_so3(R)).isApprox(R, 1e-9));
 }
+
+// --- SO(3) log for small angles ---
+
+TEST(SO3Log, SmallAngleRoundTrip) {
+    // Regression: angles in [1e-8, 1e-4] have tiny sin(theta) and previously
+    // fell into the near-pi extraction branch, returning garbage.
+    const Eigen::Vector3d axis = Eigen::Vector3d{1.0, -2.0, 0.5}.normalized();
+    for (const double theta : {1e-7, 1e-6, 1e-5, 1e-4, 1e-3}) {
+        const Eigen::Vector3d w = theta * axis;
+        EXPECT_LT((log_so3(exp_so3(w)) - w).norm(), 1e-12 + 1e-6 * theta) << "theta = " << theta;
+    }
+}

@@ -31,3 +31,11 @@ gtest_discover_tests(test_pinhole_camera)
 add_executable(test_euroc_csv test_euroc_csv.cpp)
 target_link_libraries(test_euroc_csv PRIVATE GTest::gtest_main slam_core)
 gtest_discover_tests(test_euroc_csv)
+
+add_executable(test_so3_jacobians test_so3_jacobians.cpp)
+target_link_libraries(test_so3_jacobians PRIVATE GTest::gtest_main slam_core)
+gtest_discover_tests(test_so3_jacobians)
+
+add_executable(test_optim test_optim.cpp)
+target_link_libraries(test_optim PRIVATE GTest::gtest_main slam_core)
+gtest_discover_tests(test_optim)

@@ -31,7 +31,9 @@ Eigen::Vector3d log_so3(const Eigen::Matrix3d& R) {
 
     // Near pi: sin_theta -> 0, so R - R^T extraction becomes unstable.
     // Use diagonal of R to recover axis: n_i^2 = (R_ii - cos_theta) / (1 - cos_theta)
-    if (std::abs(sin_theta) < 1e-4) {
+    // The cos_theta < 0 guard keeps small angles (which also have tiny
+    // sin_theta) in the general formula below, which is stable near zero.
+    if (std::abs(sin_theta) < 1e-4 && cos_theta < 0.0) {
         const double          one_minus_cos = 1.0 - cos_theta;
         const Eigen::Vector3d n2{(R(0, 0) - cos_theta) / one_minus_cos,
                                  (R(1, 1) - cos_theta) / one_minus_cos,
@@ -54,6 +56,33 @@ Eigen::Vector3d log_so3(const Eigen::Matrix3d& R) {
     // General case: R - R^T = 2 * sin(theta) * skew(axis)
     const Eigen::Vector3d axis{R(2, 1) - R(1, 2), R(0, 2) - R(2, 0), R(1, 0) - R(0, 1)};
     return (theta / (2.0 * sin_theta)) * axis;
+}
+
+Eigen::Matrix3d right_jacobian_so3(const Eigen::Vector3d& w) {
+    const double          theta = w.norm();
+    const Eigen::Matrix3d W     = skew(w);
+    if (theta < 1e-5) {
+        return Eigen::Matrix3d::Identity() - 0.5 * W + (1.0 / 6.0) * W * W;
+    }
+    const double theta2 = theta * theta;
+    const double theta3 = theta2 * theta;
+    return Eigen::Matrix3d::Identity() - ((1.0 - std::cos(theta)) / theta2) * W +
+           ((theta - std::sin(theta)) / theta3) * W * W;
+}
+
+Eigen::Matrix3d right_jacobian_so3_inverse(const Eigen::Vector3d& w) {
+    const double          theta = w.norm();
+    const Eigen::Matrix3d W     = skew(w);
+    if (theta < 1e-5) {
+        return Eigen::Matrix3d::Identity() + 0.5 * W + (1.0 / 12.0) * W * W;
+    }
+    const double theta2    = theta * theta;
+    const double sin_theta = std::sin(theta);
+    // As θ → π, (1 + cos θ)/(2 θ sin θ) → 0, so the coefficient tends to 1/θ².
+    const double c = (std::abs(sin_theta) < 1e-9)
+                         ? 1.0 / theta2
+                         : 1.0 / theta2 - (1.0 + std::cos(theta)) / (2.0 * theta * sin_theta);
+    return Eigen::Matrix3d::Identity() + 0.5 * W + c * W * W;
 }
 
 bool is_valid_rotation(const Eigen::Matrix3d& R, double tol) {
