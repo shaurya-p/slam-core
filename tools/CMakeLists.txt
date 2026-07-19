@@ -12,3 +12,6 @@ target_link_libraries(evaluate_accel_bias_from_gt PRIVATE slam_core)
 
 add_executable(demo_lm_point_alignment demo_lm_point_alignment.cpp)
 target_link_libraries(demo_lm_point_alignment PRIVATE slam_core)
+
+add_executable(optimize_imu_chain optimize_imu_chain.cpp)
+target_link_libraries(optimize_imu_chain PRIVATE slam_core)
